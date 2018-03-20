@@ -359,7 +359,7 @@ SECT_INTERP static int jl_source_nssavalues(jl_code_info_t *src)
 }
 
 SECT_INTERP static int jl_is_newstyle_ir(jl_code_info_t *src) {
-    return src->codelocs != jl_nothing;
+    return 1; //src->codelocs != jl_nothing;
 }
 
 SECT_INTERP static void eval_stmt_value(jl_value_t *stmt, interpreter_state *s)

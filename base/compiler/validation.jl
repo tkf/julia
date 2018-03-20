@@ -96,7 +96,7 @@ function validate_code!(errors::Vector{>:InvalidCodeError}, c::CodeInfo, is_top_
                 end
             end
         elseif isa(x, SSAValue)
-            id = x.id + 1 # ensures that id > 0 for use with BitSet
+            id = x.id
             !in(id, ssavals) && push!(ssavals, id)
         end
     end
@@ -177,7 +177,7 @@ function validate_code!(errors::Vector{>:InvalidCodeError}, c::CodeInfo, is_top_
         nssavaluetypes < nssavals && push!(errors, InvalidCodeError(SSAVALUETYPES_MISMATCH, (nssavals, nssavaluetypes)))
     else
         c.slottypes !== nothing && push!(errors, InvalidCodeError(SLOTTYPES_MISMATCH_UNINFERRED, c.slottypes))
-        c.ssavaluetypes != nssavals && push!(errors, InvalidCodeError(SSAVALUETYPES_MISMATCH_UNINFERRED, (nssavals, c.ssavaluetypes)))
+        c.ssavaluetypes != length(c.code) && push!(errors, InvalidCodeError(SSAVALUETYPES_MISMATCH_UNINFERRED, (nssavals, c.ssavaluetypes)))
     end
     return errors
 end

@@ -87,7 +87,8 @@
                                      ,@(map (lambda (v) `(implicit-global ,v)) gv)
                                      ,ex))))))
           (if (and (null? (cdadr (caddr th)))
-                   (= 0 (cadddr (caddr th))))
+                   (or (= 0 (cadddr (caddr th)))
+                       (length= (lam:body th) 2)))
               ;; if no locals, return just body of function
               (cadddr th)
               `(thunk ,th))))))

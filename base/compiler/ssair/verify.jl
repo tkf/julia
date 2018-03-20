@@ -21,11 +21,15 @@ function check_op(ir::IRCode, domtree::DomTree, @nospecialize(op), use_bb::Int, 
             if op.id > length(ir.stmts)
                 @assert ir.new_nodes[op.id - length(ir.stmts)].pos <= use_idx
             else
+                if op.id >= use_idx
+                    Core.println(ir.stmts)
+                end
                 @assert op.id < use_idx
             end
         else
             if !dominates(domtree, def_bb, use_bb) && !(bb_unreachable(domtree, def_bb) && bb_unreachable(domtree, use_bb))
                 #@Base.show ir
+                Core.println(ir.stmts)
                 @verify_error "Basic Block $def_bb does not dominate block $use_bb (tried to use value $(op.id))"
                 error()
             end
@@ -120,6 +124,12 @@ function verify_ir(ir::IRCode)
                     if ir.lines[idx] <= 0
                         #@verify_error "Missing line number information for statement $idx of $ir"
                     end
+                end
+            end
+            if isa(stmt, Expr) && stmt.head === :(=)
+                if stmt.args[1] isa SSAValue
+                    @verify_error "SSAValue as assignment LHS"
+                    error()
                 end
             end
             for op in userefs(stmt)

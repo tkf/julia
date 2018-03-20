@@ -3815,11 +3815,11 @@ static Value *emit_condition(jl_codectx_t &ctx, jl_value_t *cond, const std::str
 
 static void emit_stmtpos(jl_codectx_t &ctx, jl_value_t *expr, int ssaval_result)
 {
-    if (jl_is_ssavalue(expr))
+    if (jl_is_ssavalue(expr) && ssaval_result == -1)
         return; // value not used, no point in attempting codegen for it
     if (jl_is_linenode(expr))
         return;
-    if (jl_is_slot(expr)) {
+    if (jl_is_slot(expr) && ssaval_result == -1) {
         size_t sl = jl_slot_number(expr) - 1;
         jl_varinfo_t &vi = ctx.slots[sl];
         if (vi.usedUndef)
@@ -5331,7 +5331,7 @@ static std::unique_ptr<Module> emit_function(
     jl_array_t *stmts = ctx.code;
     size_t stmtslen = jl_array_dim0(stmts);
 
-    ctx.new_style_ir = src->codelocs != jl_nothing;
+    ctx.new_style_ir = 1; //src->codelocs != jl_nothing;
 
     // step 1b. unpack debug information
     int coverage_mode = jl_options.code_coverage;
@@ -5939,6 +5939,7 @@ static std::unique_ptr<Module> emit_function(
         return (!jl_is_submodule(mod, jl_base_module) &&
                 !jl_is_submodule(mod, jl_core_module));
     };
+    bool mod_is_user_mod = in_user_mod(ctx.module);
     struct StmtProp {
         DebugLoc loc;
         StringRef file;
@@ -5958,17 +5959,32 @@ static std::unique_ptr<Module> emit_function(
             for (size_t i = 0; i < nlocs; i++) {
                 // LineInfoNode(mod::Module, method::Symbol, file::Symbol, line::Int, inlined_at::Int)
                 jl_value_t *locinfo = jl_array_ptr_ref(src->linetable, i);
-                jl_sym_t *method = (jl_sym_t*)jl_fieldref_noalloc(locinfo, 1);
-                jl_sym_t *file = (jl_sym_t*)jl_fieldref_noalloc(locinfo, 2);
-                int line = jl_unbox_long(jl_fieldref(locinfo, 3));
-                int inlined_at = jl_unbox_long(jl_fieldref(locinfo, 4));
-                assert((size_t)inlined_at <= i);
-                StringRef filename = jl_symbol_name(file);
-                if (filename.empty())
-                    filename = "<missing>";
-                StringRef fname = jl_symbol_name(method);
-                if (fname.empty())
-                    fname = "macro expansion";
+                int inlined_at, line;
+                jl_sym_t *file;
+                StringRef filename = ctx.file;
+                StringRef fname;
+                if (jl_is_linenode(locinfo)) {
+                    line = jl_linenode_line(locinfo);
+                    if (jl_is_symbol(jl_linenode_file(locinfo))) {
+                        file = (jl_sym_t*)jl_linenode_file(locinfo);
+                        filename = jl_symbol_name(file);
+                    }
+                    inlined_at = 0;
+                    fname = ctx.name;
+                }
+                else {
+                    jl_sym_t *method = (jl_sym_t*)jl_fieldref_noalloc(locinfo, 1);
+                    file = (jl_sym_t*)jl_fieldref_noalloc(locinfo, 2);
+                    line = jl_unbox_long(jl_fieldref(locinfo, 3));
+                    inlined_at = jl_unbox_long(jl_fieldref(locinfo, 4));
+                    assert((size_t)inlined_at <= i);
+                    filename = jl_symbol_name(file);
+                    if (filename.empty())
+                        filename = "<missing>";
+                    fname = jl_symbol_name(method);
+                    if (fname.empty())
+                        fname = "macro expansion";
+                }
                 if (inlined_at == 0 && filename == ctx.file) { // if everything matches, emit a toplevel line number
                     linetable[i + 1] = DebugLoc::get(line, 0, SP, NULL);
                 }
@@ -5993,15 +6009,27 @@ static std::unique_ptr<Module> emit_function(
             cur_prop.is_poploc = false;
             if (loc > 0) {
                 jl_value_t *locinfo = jl_array_ptr_ref(src->linetable, loc - 1);
-                jl_module_t *module = (jl_module_t*)jl_fieldref_noalloc(locinfo, 0);
                 if (ctx.debug_enabled)
                     cur_prop.loc = linetable.at(loc);
                 else
                     cur_prop.loc = noDbg;
-                cur_prop.file = jl_symbol_name((jl_sym_t*)jl_fieldref_noalloc(locinfo, 2));
-                cur_prop.line = jl_unbox_long(jl_fieldref(locinfo, 3));
+                if (jl_is_linenode(locinfo)) {
+                    if (jl_is_symbol(jl_linenode_file(locinfo))) {
+                        cur_prop.file = jl_symbol_name((jl_sym_t*)jl_linenode_file(locinfo));
+                    }
+                    cur_prop.line = jl_linenode_line(locinfo);
+                    cur_prop.in_user_code = mod_is_user_mod;
+                }
+                else {
+                    jl_module_t *module = (jl_module_t*)jl_fieldref_noalloc(locinfo, 0);
+                    cur_prop.file = jl_symbol_name((jl_sym_t*)jl_fieldref_noalloc(locinfo, 2));
+                    cur_prop.line = jl_unbox_long(jl_fieldref(locinfo, 3));
+                    if (module == ctx.module)
+                        cur_prop.in_user_code = mod_is_user_mod;
+                    else
+                        cur_prop.in_user_code = in_user_mod(module);
+                }
                 cur_prop.loc_changed = (loc != prev_loc); // for code-coverage
-                cur_prop.in_user_code = in_user_mod(module);
                 prev_loc = loc;
             }
             else {
@@ -6478,6 +6506,8 @@ static std::unique_ptr<Module> emit_function(
             ctx.builder.CreateCondBr(isz, tryblk, handlr);
 #endif
             ctx.builder.SetInsertPoint(tryblk);
+        }
+        else if (jl_is_labelnode(stmt)) {
         }
         else {
             emit_stmtpos(ctx, stmt, ctx.new_style_ir ? cursor : -1);

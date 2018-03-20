@@ -481,10 +481,11 @@ function type_annotate!(sv::InferenceState)
             end
             # This can create `Expr(:gotoifnot)` with dangling label, which we
             # will clean up by replacing them with the conditions later.
-            deleteat!(body, i)
-            deleteat!(states, i)
-            nexpr -= 1
-            continue
+            #deleteat!(body, i)
+            body[i] = nothing
+            #deleteat!(states, i)
+            #nexpr -= 1
+            #continue
         end
         i += 1
     end
@@ -944,7 +945,7 @@ function inline_worthy(@nospecialize(body), src::CodeInfo, mod::Module, params::
 end
 
 ssavalue_increment(@nospecialize(body), incr) = body
-ssavalue_increment(body::SSAValue, incr) = SSAValue(body.id + incr)
+ssavalue_increment(body::SSAValue, incr) = SSAValue(incr(body.id))
 function ssavalue_increment(body::Expr, incr)
     if is_meta_expr(body)
         return body

@@ -103,6 +103,8 @@ function just_construct_ssa(ci::CodeInfo, code::Vector{Any}, nargs::Int, linetab
     # Go through and add an unreachable node after every
     # Union{} call. Then reindex labels.
     idx = 1
+    oldidx = 1
+    locs = Int[]
     while idx <= length(code)
         stmt = code[idx]
         if isexpr(stmt, :(=))
@@ -111,12 +113,28 @@ function just_construct_ssa(ci::CodeInfo, code::Vector{Any}, nargs::Int, linetab
         if isa(stmt, Expr) && stmt.typ === Union{}
             if !(idx < length(code) && isexpr(code[idx+1], :unreachable))
                 insert!(code, idx + 1, ReturnNode())
+                insert!(ci.codelocs, idx + 1, ci.codelocs[idx])
+                insert!(ci.ssavaluetypes, idx + 1, Union{})
+                push!(locs, oldidx + 1)
                 idx += 1
             end
         end
         idx += 1
+        oldidx += 1
     end
-    reindex_labels!(code) # update labels changed above
+    if !isempty(locs)
+        reindex_labels!(code) # update labels changed above
+        function incr(id)
+            j = searchsortedfirst(locs, id)
+            if j > length(locs) || locs[j] != id
+                j -= 1
+            end
+            return id + j
+        end
+        for i = 1:length(code)
+            code[i] = ssavalue_increment(code[i], incr)
+        end
+    end
 
     inbounds_depth = 0 # Number of stacked inbounds
     meta = Any[]
@@ -160,11 +178,17 @@ function just_construct_ssa(ci::CodeInfo, code::Vector{Any}, nargs::Int, linetab
 end
 
 function run_passes(ci::CodeInfo, nargs::Int, linetable::Vector{LineInfoNode}, sv::OptimizationState)
-    ir = just_construct_ssa(ci, copy(ci.code), nargs, linetable)
+    ir = just_construct_ssa(ci, copy_exprargs(ci.code), nargs, linetable)
     #@Base.show ("after_construct", ir)
     # TODO: Domsorting can produce an updated domtree - no need to recompute here
     @timeit "compact 1" ir = compact!(ir)
-    #@timeit "verify 1" verify_ir(ir)
+    try
+        @timeit "verify 1" verify_ir(ir)
+    catch
+        Core.println(ci.code)
+        Core.println(ci.linetable)
+        error()
+    end
     @timeit "Inlining" ir = ssa_inlining_pass!(ir, linetable, sv)
     #@timeit "verify 2" verify_ir(ir)
     @timeit "domtree 2" domtree = construct_domtree(ir.cfg)

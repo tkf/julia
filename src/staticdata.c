@@ -1615,7 +1615,7 @@ static void jl_init_serializer2(int for_serialize)
                      jl_methtable_type, jl_typemap_level_type, jl_typemap_entry_type,
                      jl_voidpointer_type, jl_newvarnode_type,
                      jl_array_symbol_type, jl_anytuple_type, jl_tparam0(jl_anytuple_type),
-                     jl_emptytuple_type, jl_array_uint8_type,
+                     jl_emptytuple_type, jl_array_uint8_type, jl_array_int_type,
                      jl_symbol_type->name, jl_ssavalue_type->name, jl_tuple_typename,
                      ((jl_datatype_t*)jl_unwrap_unionall((jl_value_t*)jl_ref_type))->name,
                      jl_pointer_typename, jl_simplevector_type->name,

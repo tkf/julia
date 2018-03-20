@@ -204,11 +204,19 @@ static void jl_code_info_set_ast(jl_code_info_t *li, jl_expr_t *ast)
 {
     assert(jl_is_expr(ast));
     jl_expr_t *bodyex = (jl_expr_t*)jl_exprarg(ast, 2);
+    jl_value_t *codelocs = jl_exprarg(ast, 3);
+    li->linetable = jl_exprarg(ast, 4);
+    size_t nlocs = jl_array_len(codelocs);
+    li->codelocs = jl_alloc_array_1d(jl_array_int_type, nlocs);
+    size_t j;
+    for (j = 0; j < nlocs; j++) {
+        jl_arrayset(li->codelocs, jl_arrayref(codelocs, j), j);
+    }
     assert(jl_is_expr(bodyex));
     jl_array_t *body = bodyex->args;
     li->code = body;
     jl_gc_wb(li, li->code);
-    size_t j, n = jl_array_len(body);
+    size_t n = jl_array_len(body);
     jl_value_t **bd = (jl_value_t**)jl_array_data((jl_array_t*)li->code);
     for (j = 0; j < n; j++) {
         jl_value_t *st = bd[j];
@@ -246,8 +254,6 @@ static void jl_code_info_set_ast(jl_code_info_t *li, jl_expr_t *ast)
     jl_gc_wb(li, li->slotflags);
     li->ssavaluetypes = jl_box_long(nssavalue);
     jl_gc_wb(li, li->ssavaluetypes);
-    li->linetable = jl_nothing;
-    li->codelocs = jl_nothing;
     li->ssaflags = jl_alloc_array_1d(jl_array_uint8_type, 0);
 
     // Flags that need to be copied to slotflags

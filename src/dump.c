@@ -2974,7 +2974,7 @@ void jl_init_serializer(void)
                      jl_box_int32(18), jl_box_int32(19), jl_box_int32(20),
                      jl_box_int32(21), jl_box_int32(22), jl_box_int32(23),
                      jl_box_int32(24), jl_box_int32(25), jl_box_int32(26),
-                     jl_box_int32(27), jl_box_int32(28),
+                     jl_box_int32(27),
 
                      jl_box_int64(0), jl_box_int64(1), jl_box_int64(2),
                      jl_box_int64(3), jl_box_int64(4), jl_box_int64(5),
@@ -3000,7 +3000,7 @@ void jl_init_serializer(void)
                      jl_voidpointer_type, jl_newvarnode_type, jl_abstractstring_type,
                      jl_array_symbol_type, jl_anytuple_type, jl_tparam0(jl_anytuple_type),
                      jl_emptytuple_type, jl_array_uint8_type, jl_code_info_type,
-                     jl_typeofbottom_type, jl_namedtuple_type,
+                     jl_typeofbottom_type, jl_namedtuple_type, jl_array_int_type,
 
                      ptls->root_task,
 

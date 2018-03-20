@@ -206,7 +206,11 @@ function find_ssavalue_uses(body::Vector{Any}, nvals::Int)
     uses = BitSet[ BitSet() for i = 1:nvals ]
     for line in 1:length(body)
         e = body[line]
-        isa(e, Expr) && find_ssavalue_uses(e, uses, line)
+        if isa(e, SSAValue)
+            push!(uses[e.id], line)
+        elseif isa(e, Expr)
+            find_ssavalue_uses(e, uses, line)
+        end
     end
     return uses
 end
@@ -219,25 +223,11 @@ function find_ssavalue_uses(e::Expr, uses::Vector{BitSet}, line::Int)
         if skiparg
             skiparg = false
         elseif isa(a, SSAValue)
-            push!(uses[a.id + 1], line)
+            push!(uses[a.id], line)
         elseif isa(a, Expr)
             find_ssavalue_uses(a, uses, line)
         end
     end
-end
-
-function find_ssavalue_defs(body::Vector{Any}, nvals::Int)
-    defs = zeros(Int, nvals)
-    for line in 1:length(body)
-        e = body[line]
-        if isa(e, Expr) && e.head === :(=)
-            lhs = e.args[1]
-            if isa(lhs, SSAValue)
-                defs[lhs.id + 1] = line
-            end
-        end
-    end
-    return defs
 end
 
 # using a function to ensure we can infer this
