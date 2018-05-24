@@ -231,10 +231,12 @@ Compute hyperbolic tangent of `x`.
 tanh(x::Number)
 
 """
-    atan(x)
+    atan(y)
+    atan(y, x)
 
-Compute the inverse tangent of `x`, where the output is in radians.
+Compute the inverse tangent of `y`, where the output is in radians.
 """
+atan(x::Number)
 atan(x::Number)
 
 """
@@ -510,9 +512,20 @@ hypot(x::Number...) = sqrt(sum(abs2(y) for y in x))
 
 Compute the inverse tangent of `y/x`, using the signs of both `x` and `y` to determine the
 quadrant of the return value.
+
+This is also available via [`atan`](@ref), but `atan2` is provided for compatibility
+purposes.
 """
-atan2(y::Real, x::Real) = atan2(promote(float(y),float(x))...)
-atan2(y::T, x::T) where {T<:AbstractFloat} = Base.no_op_err("atan2", T)
+atan2(y, x) = atan(y, x)
+
+"""
+    atan(y, x)
+
+Compute the inverse tangent of `y/x`, using the signs of both `x` and `y` to determine the
+quadrant of the return value.
+"""
+atan(y::Real, x::Real) = atan(promote(float(y),float(x))...)
+atan(y::T, x::T) where {T<:AbstractFloat} = Base.no_op_err("atan", T)
 
 max(x::T, y::T) where {T<:AbstractFloat} = ifelse((y > x) | (signbit(y) < signbit(x)),
                                     ifelse(isnan(x), x, y), ifelse(isnan(y), y, x))
@@ -958,7 +971,7 @@ for func in (:sin,:cos,:tan,:asin,:acos,:atan,:sinh,:cosh,:tanh,:asinh,:acosh,
     end
 end
 
-for func in (:atan2,:hypot)
+for func in (:atan,:hypot)
     @eval begin
         $func(a::Float16,b::Float16) = Float16($func(Float32(a),Float32(b)))
     end
