@@ -379,19 +379,24 @@ function annotate_slot_load!(e::Expr, vtypes::VarTable, sv::InferenceState, unde
         if isa(subex, Expr)
             annotate_slot_load!(subex, vtypes, sv, undefs)
         elseif isa(subex, Slot)
-            id = slot_id(subex)
-            s = vtypes[id]
-            vt = maybe_widen_conditional(s.typ)
-            if s.undef
-                # find used-undef variables
-                undefs[id] = true
-            end
-            #  add type annotations where needed
-            if !(sv.src.slottypes[id] ⊑ vt)
-                e.args[i] = TypedSlot(id, vt)
-            end
+            e.args[i] = visit_slot_load!(subex, vtypes, sv, undefs)
         end
     end
+end
+
+function visit_slot_load!(sl::Slot, vtypes::VarTable, sv::InferenceState, undefs::Array{Bool,1})
+    id = slot_id(sl)
+    s = vtypes[id]
+    vt = maybe_widen_conditional(s.typ)
+    if s.undef
+        # find used-undef variables
+        undefs[id] = true
+    end
+    # add type annotations where needed
+    if !(sv.src.slottypes[id] ⊑ vt)
+        return TypedSlot(id, vt)
+    end
+    return sl
 end
 
 function record_slot_assign!(sv::InferenceState)
@@ -466,11 +471,7 @@ function type_annotate!(sv::InferenceState)
             if isa(expr, Expr)
                 annotate_slot_load!(expr, st_i, sv, undefs)
             elseif isa(expr, Slot)
-                id = slot_id(expr)
-                if st_i[id].undef
-                    # find used-undef variables in statement position
-                    undefs[id] = true
-                end
+                body[i] = visit_slot_load!(expr, st_i, sv, undefs)
             end
         elseif sv.optimize
             if ((isa(expr, Expr) && is_meta_expr(expr)) ||
@@ -481,8 +482,12 @@ function type_annotate!(sv::InferenceState)
             end
             # This can create `Expr(:gotoifnot)` with dangling label, which we
             # will clean up by replacing them with the conditions later.
+            if isa(expr, GotoNode) || isexpr(expr, :gotoifnot) || isexpr(expr, :return)
+                body[i] = Expr(:unreachable)
+            else
+                body[i] = nothing
+            end
             #deleteat!(body, i)
-            body[i] = nothing
             #deleteat!(states, i)
             #nexpr -= 1
             #continue

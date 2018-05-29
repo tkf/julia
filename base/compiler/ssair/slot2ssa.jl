@@ -728,6 +728,9 @@ function construct_ssa!(ci::CodeInfo, code::Vector{Any}, ir::IRCode, domtree::Do
             new_code[idx] = GotoIfNot(stmt.cond, block_for_inst(cfg, stmt.dest))
         elseif isexpr(stmt, :enter)
             new_code[idx] = Expr(:enter, block_for_inst(cfg, stmt.args[1]))
+        elseif isa(stmt, LabelNode) || isexpr(stmt, :leave) || isexpr(stmt, :(=)) || isexpr(stmt, :return) ||
+            isexpr(stmt, :meta) || isa(stmt, NewvarNode)
+            new_code[idx] = stmt
         else
             ssavalmap[idx] = SSAValue(idx)
             types[idx] = ci.ssavaluetypes[idx]
