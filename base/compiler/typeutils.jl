@@ -99,6 +99,16 @@ function tuple_tail_elem(@nospecialize(init), ct)
     return Vararg{widenconst(foldl((a, b) -> tmerge(a, tvar_extent(unwrapva(b))), init, ct))}
 end
 
+function countunionsplit(atypes)
+    nu = 1
+    for ti in atypes
+        if isa(ti, Union)
+            nu *= unionlen(ti::Union)
+        end
+    end
+    return nu
+end
+
 # take a Tuple where one or more parameters are Unions
 # and return an array such that those Unions are removed
 # and `Union{return...} == ty`

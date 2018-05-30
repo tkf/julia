@@ -69,6 +69,33 @@ function OptimizationState(linfo::MethodInstance, params::Params)
     return OptimizationState(linfo, src, params)
 end
 
+#############
+# constants #
+#############
+
+# The slot has uses that are not statically dominated by any assignment
+# This is implied by `SLOT_USEDUNDEF`.
+# If this is not set, all the uses are (statically) dominated by the defs.
+# In particular, if a slot has `AssignedOnce && !StaticUndef`, it is an SSA.
+const SLOT_STATICUNDEF  = 1
+const SLOT_ASSIGNEDONCE = 16 # slot is assigned to only once
+const SLOT_USEDUNDEF    = 32 # slot has uses that might raise UndefVarError
+# const SLOT_CALLED      = 64
+
+const IR_FLAG_INBOUNDS = 0x01
+
+# known affect-free calls (also effect-free)
+const _PURE_BUILTINS = Any[tuple, svec, fieldtype, apply_type, ===, isa, typeof, UnionAll, nfields]
+
+# known effect-free calls (might not be affect-free)
+const _PURE_BUILTINS_VOLATILE = Any[getfield, arrayref, isdefined, Core.sizeof]
+
+const TOP_TUPLE = GlobalRef(Core, :tuple)
+
+#########
+# logic #
+#########
+
 include("compiler/ssair/driver.jl")
 
 _topmod(sv::OptimizationState) = _topmod(sv.mod)
@@ -91,49 +118,6 @@ function add_backedge!(li::MethodInstance, caller::OptimizationState)
     update_valid_age!(li, caller)
     nothing
 end
-
-###########
-# structs #
-###########
-
-struct InvokeData
-    mt::Core.MethodTable
-    entry::Core.TypeMapEntry
-    types0
-    fexpr
-    texpr
-end
-
-#############
-# constants #
-#############
-
-# The slot has uses that are not statically dominated by any assignment
-# This is implied by `SLOT_USEDUNDEF`.
-# If this is not set, all the uses are (statically) dominated by the defs.
-# In particular, if a slot has `AssignedOnce && !StaticUndef`, it is an SSA.
-const SLOT_STATICUNDEF  = 1
-
-const SLOT_ASSIGNEDONCE = 16 # slot is assigned to only once
-
-const SLOT_USEDUNDEF    = 32 # slot has uses that might raise UndefVarError
-
-# const SLOT_CALLED      = 64
-
-const IR_FLAG_INBOUNDS = 0x01
-
-
-# known affect-free calls (also effect-free)
-const _PURE_BUILTINS = Any[tuple, svec, fieldtype, apply_type, ===, isa, typeof, UnionAll, nfields]
-
-# known effect-free calls (might not be affect-free)
-const _PURE_BUILTINS_VOLATILE = Any[getfield, arrayref, isdefined, Core.sizeof]
-
-const TOP_TUPLE = GlobalRef(Core, :tuple)
-
-#########
-# logic #
-#########
 
 function isinlineable(m::Method, src::CodeInfo, mod::Module, params::Params, bonus::Int=0)
     # compute the cost (size) of inlining this code
@@ -582,92 +566,6 @@ function widen_slot_type(@nospecialize(ty), untypedload::Bool)
     return Any
 end
 
-# replace slots 1:na with argexprs, static params with spvals, and increment
-# other slots by offset.
-function substitute!(
-        @nospecialize(e), na::Int, argexprs::Vector{Any},
-        @nospecialize(spsig), spvals::Vector{Any},
-        offset::Int, boundscheck::Symbol)
-    if isa(e, Slot)
-        id = slot_id(e)
-        if 1 <= id <= na
-            ae = argexprs[id]
-            if isa(e, TypedSlot) && isa(ae, Slot)
-                return TypedSlot(ae.id, e.typ)
-            end
-            return ae
-        end
-        if isa(e, SlotNumber)
-            return SlotNumber(id + offset)
-        else
-            return TypedSlot(id + offset, e.typ)
-        end
-    end
-    if isa(e, NewvarNode)
-        return NewvarNode(substitute!(e.slot, na, argexprs, spsig, spvals, offset, boundscheck))
-    end
-    if isa(e, PhiNode)
-        values = Vector{Any}(undef, length(e.values))
-        for i = 1:length(values)
-            isassigned(e.values, i) || continue
-            values[i] = substitute!(e.values[i], na, argexprs, spsig,
-                spvals, offset, boundscheck)
-        end
-        return PhiNode(e.edges, values)
-    end
-    if isa(e, PiNode)
-        return PiNode(substitute!(e.val, na, argexprs, spsig, spvals, offset, boundscheck), e.typ)
-    end
-    if isa(e, Expr)
-        e = e::Expr
-        head = e.head
-        if head === :static_parameter
-            return quoted(spvals[e.args[1]])
-        elseif head === :cfunction
-            @assert !isa(spsig, UnionAll) || !isempty(spvals)
-            if !(e.args[2] isa QuoteNode) # very common no-op
-                e.args[2] = substitute!(e.args[2], na, argexprs, spsig, spvals, offset, boundscheck)
-            end
-            e.args[3] = ccall(:jl_instantiate_type_in_env, Any, (Any, Any, Ptr{Any}), e.args[3], spsig, spvals)
-            e.args[4] = svec(Any[
-                ccall(:jl_instantiate_type_in_env, Any, (Any, Any, Ptr{Any}), argt, spsig, spvals)
-                for argt
-                in e.args[4] ]...)
-        elseif head === :foreigncall
-            @assert !isa(spsig, UnionAll) || !isempty(spvals)
-            for i = 1:length(e.args)
-                if i == 2
-                    e.args[2] = ccall(:jl_instantiate_type_in_env, Any, (Any, Any, Ptr{Any}), e.args[2], spsig, spvals)
-                elseif i == 3
-                    e.args[3] = svec(Any[
-                        ccall(:jl_instantiate_type_in_env, Any, (Any, Any, Ptr{Any}), argt, spsig, spvals)
-                        for argt
-                        in e.args[3] ]...)
-                elseif i == 4
-                    @assert isa((e.args[4]::QuoteNode).value, Symbol)
-                elseif i == 5
-                    @assert isa(e.args[5], Int)
-                else
-                    e.args[i] = substitute!(e.args[i], na, argexprs, spsig, spvals, offset, boundscheck)
-                end
-            end
-        elseif head === :boundscheck
-            if boundscheck === :propagate
-                return e
-            elseif boundscheck === :off
-                return false
-            else
-                return true
-            end
-        elseif !is_meta_expr_head(head)
-            for i = 1:length(e.args)
-                e.args[i] = substitute!(e.args[i], na, argexprs, spsig, spvals, offset, boundscheck)
-            end
-        end
-    end
-    return e
-end
-
 # whether `f` is pure for inference
 function is_pure_intrinsic_infer(f::IntrinsicFunction)
     return !(f === Intrinsics.pointerref || # this one is volatile
@@ -813,16 +711,6 @@ function effect_free(@nospecialize(e), src, mod::Module, allow_volatile::Bool)
     return true
 end
 
-function countunionsplit(atypes)
-    nu = 1
-    for ti in atypes
-        if isa(ti, Union)
-            nu *= unionlen(ti::Union)
-        end
-    end
-    return nu
-end
-
 ## Computing the cost of a function body
 
 # saturating sum (inputs are nonnegative), prevents overflow with typemax(Int) below
@@ -930,55 +818,6 @@ function inline_worthy(body::Array{Any,1}, src::CodeInfo, mod::Module,
     return bodycost <= cost_threshold
 end
 
-function inline_worthy(body::Expr, src::CodeInfo, mod::Module, params::Params,
-                       cost_threshold::Integer=params.inline_cost_threshold)
-    bodycost = statement_cost(body, typemax(Int), src, mod, params)
-    return bodycost <= cost_threshold
-end
-
-function inline_worthy(@nospecialize(body), src::CodeInfo, mod::Module, params::Params,
-                       cost_threshold::Integer=params.inline_cost_threshold)
-    newbody = exprtype(body, src, mod)
-    !isa(newbody, Expr) && return true
-    return inline_worthy(newbody, src, mod, params, cost_threshold)
-end
-
-ssavalue_increment(@nospecialize(body), incr) = body
-ssavalue_increment(body::SSAValue, incr) = SSAValue(body.id + incr)
-function ssavalue_increment(body::Expr, incr)
-    if is_meta_expr(body)
-        return body
-    end
-    for i in 1:length(body.args)
-        body.args[i] = ssavalue_increment(body.args[i], incr)
-    end
-    return body
-end
-ssavalue_increment(body::PiNode, incr) = PiNode(ssavalue_increment(body.val, incr), body.typ)
-function ssavalue_increment(body::PhiNode, incr)
-    values = Vector{Any}(undef, length(body.values))
-    for i = 1:length(values)
-        isassigned(body.values, i) || continue
-        values[i] = ssavalue_increment(body.values[i], incr)
-    end
-    return PhiNode(body.edges, values)
-end
-
-function mk_tuplecall(args, sv::OptimizationState)
-    e = Expr(:call, TOP_TUPLE, args...)
-    e.typ = tuple_tfunc(Tuple{Any[widenconst(exprtype(x, sv.src, sv.mod)) for x in args]...})
-    return e
-end
-
-function add_slot!(src::CodeInfo, @nospecialize(typ), is_sa::Bool, name::Symbol=COMPILER_TEMP_SYM)
-    @assert !isa(typ, Const) && !isa(typ, Conditional)
-    id = length(src.slotnames) + 1
-    push!(src.slotnames, name)
-    push!(src.slottypes, typ)
-    push!(src.slotflags, is_sa * SLOT_ASSIGNEDONCE)
-    return SlotNumber(id)
-end
-
 function is_known_call(e::Expr, @nospecialize(func), src, mod::Module)
     if e.head !== :call
         return false
@@ -1035,11 +874,10 @@ function reindex_labels!(body::Vector{Any})
             pop!(body)
         end
     end
+    nothing
 end
 
-function reindex_labels!(sv::OptimizationState)
-    reindex_labels!(sv.src.code)
-end
+reindex_labels!(sv::OptimizationState) = reindex_labels!(sv.src.code)
 
 function return_type(@nospecialize(f), @nospecialize(t))
     params = Params(ccall(:jl_get_tls_world_age, UInt, ()))
