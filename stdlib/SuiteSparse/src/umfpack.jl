@@ -18,11 +18,11 @@ struct MatrixIllConditionedException <: Exception
     msg::AbstractString
 end
 
-function umferror(status::Integer)
+function umferror(status::Integer, checksingular::Bool=true)
     if status==UMFPACK_OK
         return
     elseif status==UMFPACK_WARNING_singular_matrix
-        throw(LinearAlgebra.SingularException(0))
+        checksingular && throw(LinearAlgebra.SingularException(0))
     elseif status==UMFPACK_WARNING_determinant_underflow
         throw(MatrixIllConditionedException("the determinant is nonzero but underflowed"))
     elseif status==UMFPACK_WARNING_determinant_overflow
@@ -108,13 +108,17 @@ Base.adjoint(F::UmfpackLU) = Adjoint(F)
 Base.transpose(F::UmfpackLU) = Transpose(F)
 
 """
-    lu(A::SparseMatrixCSC) -> F::UmfpackLU
+    lu(A::SparseMatrixCSC; check = true) -> F::UmfpackLU
 
 Compute the LU factorization of a sparse matrix `A`.
 
 For sparse `A` with real or complex element type, the return type of `F` is
 `UmfpackLU{Tv, Ti}`, with `Tv` = [`Float64`](@ref) or `ComplexF64` respectively and
 `Ti` is an integer type ([`Int32`](@ref) or [`Int64`](@ref)).
+
+When `check = true`, an error is thrown if the decomposition fails.
+When `check = false`, responsibility for checking the decomposition's
+validity (via [`issuccess`](@ref)) lies with the user.
 
 The individual components of the factorization `F` can be accessed by indexing:
 
@@ -143,25 +147,29 @@ The relation between `F` and `A` is
     `ComplexF64` elements, `lu` converts `A` into a copy that is of type
     `SparseMatrixCSC{Float64}` or `SparseMatrixCSC{ComplexF64}` as appropriate.
 """
-function lu(S::SparseMatrixCSC{<:UMFVTypes,<:UMFITypes})
+function lu(S::SparseMatrixCSC{<:UMFVTypes,<:UMFITypes}; check::Bool = true)
     zerobased = S.colptr[1] == 0
     res = UmfpackLU(C_NULL, C_NULL, S.m, S.n,
                     zerobased ? copy(S.colptr) : decrement(S.colptr),
                     zerobased ? copy(S.rowval) : decrement(S.rowval),
                     copy(S.nzval))
     finalizer(umfpack_free_symbolic, res)
-    umfpack_numeric!(res)
+    U, _ = umfpack_numeric!(res, check)
+    return U
 end
-lu(A::SparseMatrixCSC{<:Union{Float16,Float32},Ti}) where {Ti<:UMFITypes} =
-    lu(convert(SparseMatrixCSC{Float64,Ti}, A))
-lu(A::SparseMatrixCSC{<:Union{ComplexF16,ComplexF32},Ti}) where {Ti<:UMFITypes} =
-    lu(convert(SparseMatrixCSC{ComplexF64,Ti}, A))
-lu(A::Union{SparseMatrixCSC{T},SparseMatrixCSC{Complex{T}}}) where {T<:AbstractFloat} =
+lu(A::SparseMatrixCSC{<:Union{Float16,Float32},Ti};
+   check::Bool = true) where {Ti<:UMFITypes} =
+    lu(convert(SparseMatrixCSC{Float64,Ti}, A); check = check)
+lu(A::SparseMatrixCSC{<:Union{ComplexF16,ComplexF32},Ti};
+   check::Bool = true) where {Ti<:UMFITypes} =
+    lu(convert(SparseMatrixCSC{ComplexF64,Ti}, A); check = check)
+lu(A::Union{SparseMatrixCSC{T},SparseMatrixCSC{Complex{T}}};
+   check::Bool = true) where {T<:AbstractFloat} =
     throw(ArgumentError(string("matrix type ", typeof(A), "not supported. ",
     "Try lu(convert(SparseMatrixCSC{Float64/ComplexF64,Int}, A)) for ",
     "sparse floating point LU using UMFPACK or lu(Array(A)) for generic ",
     "dense LU.")))
-lu(A::SparseMatrixCSC) = lu(float(A))
+lu(A::SparseMatrixCSC; check::Bool = true) = lu(float(A); check = check)
 
 
 size(F::UmfpackLU) = (F.m, F.n)
@@ -178,8 +186,8 @@ function size(F::UmfpackLU, dim::Integer)
 end
 
 function show(io::IO, F::UmfpackLU)
-    println(io, "UMFPACK LU Factorization of a $(size(F)) sparse matrix")
-    F.numeric != C_NULL && println(io, F.numeric)
+    print(io, "UMFPACK LU Factorization of a $(size(F)) sparse matrix")
+    F.numeric != C_NULL && print(io, '\n', F.numeric)
 end
 
 ## Wrappers for UMFPACK functions
@@ -223,8 +231,7 @@ for itype in UmfpackIndexTypes
             U.symbolic = tmp[1]
             return U
         end
-        function umfpack_numeric!(U::UmfpackLU{Float64,$itype})
-            if U.numeric != C_NULL return U end
+        function umfpack_numeric!(U::UmfpackLU{Float64,$itype}, check::Bool = true)
             if U.symbolic == C_NULL umfpack_symbolic!(U) end
             tmp = Vector{Ptr{Cvoid}}(undef, 1)
             status = ccall(($num_r, :libumfpack), $itype,
@@ -232,14 +239,11 @@ for itype in UmfpackIndexTypes
                             Ptr{Float64}, Ptr{Float64}),
                            U.colptr, U.rowval, U.nzval, U.symbolic, tmp,
                            umf_ctrl, umf_info)
-            if status != UMFPACK_WARNING_singular_matrix
-                umferror(status)
-            end
+            umferror(status, check)
             U.numeric = tmp[1]
-            return U
+            return U, status
         end
-        function umfpack_numeric!(U::UmfpackLU{ComplexF64,$itype})
-            if U.numeric != C_NULL return U end
+        function umfpack_numeric!(U::UmfpackLU{ComplexF64,$itype}, check::Bool = true)
             if U.symbolic == C_NULL umfpack_symbolic!(U) end
             tmp = Vector{Ptr{Cvoid}}(undef, 1)
             status = ccall(($num_c, :libumfpack), $itype,
@@ -247,11 +251,9 @@ for itype in UmfpackIndexTypes
                             Ptr{Float64}, Ptr{Float64}),
                            U.colptr, U.rowval, real(U.nzval), imag(U.nzval), U.symbolic, tmp,
                            umf_ctrl, umf_info)
-            if status != UMFPACK_WARNING_singular_matrix
-                umferror(status)
-            end
+            umferror(status, check)
             U.numeric = tmp[1]
-            return U
+            return U, status
         end
         function solve!(x::StridedVector{Float64}, lu::UmfpackLU{Float64,$itype}, b::StridedVector{Float64}, typ::Integer)
             if x === b
@@ -387,7 +389,11 @@ function nnz(lu::UmfpackLU)
     return Int(lnz + unz)
 end
 
-det(A::SparseMatrixCSC) = det(lu(A))
+function LinearAlgebra.issuccess(lu::UmfpackLU)
+    U, status = umfpack_numeric!(lu, false)
+    return status == UMFPACK_OK
+end
+
 
 ### Solve with Factorization
 
@@ -534,7 +540,8 @@ end
 
 umfpack_report_numeric(num::Ptr{Cvoid}) = umfpack_report_numeric(num, 4.)
 function umfpack_report_numeric(lu::UmfpackLU, level::Real)
-    umfpack_report_numeric(umfpack_numeric!(lu).numeric, level)
+    U, _ = umfpack_numeric!(lu)
+    umfpack_report_numeric(U.numeric, level)
 end
 
 umfpack_report_numeric(lu::UmfpackLU) = umfpack_report_numeric(lu,4.)
