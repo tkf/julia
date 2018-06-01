@@ -47,6 +47,13 @@ jobs:
           make prefix=/tmp/julia install &&
           ccache -s &&
           make build-stats
+      - run: | # determine git commit range
+          COMMIT_RANGE=$(echo "${CIRCLE_COMPARE_URL}" | cut -d/ -f7) &&
+          if [[ $COMMIT_RANGE != *"..."* ]]; then
+            COMMIT_RANGE="${COMMIT_RANGE}...${COMMIT_RANGE}";
+          fi &&
+          export COMMIT_RANGE &&
+          echo $COMMIT_RANGE
       - run: | # move source tree out of the way, run tests from install tree
           cd .. &&
           mv project julia-src &&
@@ -54,8 +61,11 @@ jobs:
           /tmp/julia/bin/julia --sysimage-native-code=no -e 'true' &&
           /tmp/julia/bin/julia-debug --sysimage-native-code=no -e 'true' &&
           pushd /tmp/julia/share/julia/test &&
-          /tmp/julia/bin/julia --check-bounds=yes runtests.jl all --skip Sockets | bar -i 30 &&
-          /tmp/julia/bin/julia --check-bounds=yes runtests.jl LibGit2/online OldPkg/pkg Pkg/pkg download &&
+          echo $COMMIT_RANGE &&
+          if [ ! -z $(git diff --name-only $COMMIT_RANGE | grep -v '^doc/') ]; then
+            /tmp/julia/bin/julia --check-bounds=yes runtests.jl all --skip Sockets | bar -i 30 &&
+            /tmp/julia/bin/julia --check-bounds=yes runtests.jl LibGit2/online OldPkg/pkg Pkg/pkg download;
+          fi &&
           popd &&
           mkdir /tmp/embedding-test &&
           make check -C /tmp/julia/share/julia/test/embedding \
