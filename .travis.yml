@@ -139,8 +139,11 @@ script:
         /tmp/julia/bin/julia-debug --sysimage-native-code=no -e 'true'
     - /tmp/julia/bin/julia -e 'versioninfo()'
     - pushd /tmp/julia/share/julia/test
-    - /tmp/julia/bin/julia --check-bounds=yes runtests.jl $TESTSTORUN &&
-      /tmp/julia/bin/julia --check-bounds=yes runtests.jl LibGit2/online OldPkg/pkg Pkg/pkg download
+    # skip tests if only files within the "doc" dir have changed
+    - if [ ! -z $(git diff --name-only $TRAVIS_COMMIT_RANGE | grep -v '^doc/') ]; then
+        /tmp/julia/bin/julia --check-bounds=yes runtests.jl $TESTSTORUN &&
+        /tmp/julia/bin/julia --check-bounds=yes runtests.jl LibGit2/online OldPkg/pkg Pkg/pkg download
+      fi
     - popd
     # test that the embedding code works on our installation
     - mkdir /tmp/embedding-test &&
