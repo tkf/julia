@@ -23,11 +23,11 @@ sharing](https://en.wikipedia.org/wiki/Evaluation_strategy#Call_by_sharing)
 while this prevents accidental modification by callees of a value in the caller,
 it makes avoiding unwanted copying of arrays difficult. By convention, a
 function name ending with a `!` indicates that it will mutate or destroy the
-value of one or more of its arguments. Callees must make explicit copies to
-ensure that they don't modify inputs that they don't intend to change. Many non-
-mutating functions are implemented by calling a function of the same name with
-an added `!` at the end on an explicit copy of the input, and returning that
-copy.
+value of one or more of its arguments (see, for example, [`sum`](@ref) and [`sum!`](@ref).
+Callees must make explicit copies to ensure that they don't modify inputs that
+they don't intend to change. Many non- mutating functions are implemented by
+calling a function of the same name with an added `!` at the end on an explicit
+copy of the input, and returning that copy.
 
 ## Arrays
 
@@ -79,6 +79,25 @@ The syntax `[A, B, C, ...]` constructs a 1-d array (vector) of its arguments. If
 arguments have a common [promotion type](@ref conversion-and-promotion) then they get
 converted to that type using [`convert`](@ref).
 
+To see the various ways we can pass dimensions to these constructors, consider the following examples:
+```jldoctest
+julia> zeros(Int8, 2, 2)
+2×2 Array{Int8,2}:
+ 0  0
+ 0  0
+
+julia> zeros(Int8, (2, 2))
+2×2 Array{Int8,2}:
+ 0  0
+ 0  0
+
+julia> zeros((2, 2))
+2×2 Array{Float64,2}:
+ 0.0  0.0
+ 0.0  0.0
+```
+Here, `(2, 2)` is a [`Tuple`](@ref).
+
 ### Concatenation
 
 Arrays can be constructed and also concatenated using the following functions:
@@ -89,7 +108,19 @@ Arrays can be constructed and also concatenated using the following functions:
 | [`vcat(A...)`](@ref)        | shorthand for `cat(A...; dims=1)`               |
 | [`hcat(A...)`](@ref)        | shorthand for `cat(A...; dims=2)`               |
 
-Scalar values passed to these functions are treated as 1-element arrays.
+Scalar values passed to these functions are treated as 1-element arrays. For example,
+```jldoctest
+julia> vcat([1, 2, 3], 4)
+4-element Array{Int64,1}:
+ 1
+ 2
+ 3
+ 4
+
+julia> hcat([1 2 3], 4)
+1×4 Array{Int64,2}:
+ 1  2  3  4
+```
 
 The concatenation functions are used so often that they have special syntax:
 
@@ -100,6 +131,24 @@ The concatenation functions are used so often that they have special syntax:
 | `[A B; C D; ...]` | [`hvcat`](@ref) |
 
 [`hvcat`](@ref) concatenates in both dimension 1 (with semicolons) and dimension 2 (with spaces).
+Consider these examples of this syntax:
+```jldoctest
+julia> [[1; 2]; [3, 4]]
+4-element Array{Int64,1}:
+ 1
+ 2
+ 3
+ 4
+
+julia> [[1 2] [3 4]]
+1×4 Array{Int64,2}:
+ 1  2  3  4
+
+julia> [[1 2]; [3 4]]
+2×2 Array{Int64,2}:
+ 1  2
+ 3  4
+```
 
 ### Typed array initializers
 
@@ -421,6 +470,58 @@ indices and can be converted to such by [`to_indices`](@ref):
 3. An object that represents an array of scalar indices and can be converted to such by [`to_indices`](@ref). By default this includes:
     * [`Colon()`](@ref) (`:`), which represents all indices within an entire dimension or across the entire array
     * Arrays of booleans, which select elements at their `true` indices (see below for more details)
+
+Some examples:
+```jldoctest
+julia> A = reshape(collect(1:2:32), (4,4))
+4×4 Array{Int64,2}:
+ 1   9  17  25
+ 3  11  19  27
+ 5  13  21  29
+ 7  15  23  31
+
+julia> A[5]
+9
+
+julia> A[[5, 7, 9]]
+3-element Array{Int64,1}:
+  9
+ 13
+ 17
+
+julia> A[[5 7; 9 11]]
+2×2 Array{Int64,2}:
+  9  13
+ 17  21
+
+julia> A[[]]
+0-element Array{Int64,1}
+
+julia> A[1:2:16]
+8-element Array{Int64,1}:
+  1
+  5
+  9
+ 13
+ 17
+ 21
+ 25
+ 29
+
+julia> A[2, :]
+4-element Array{Int64,1}:
+  3
+ 11
+ 19
+ 27
+
+julia> A[:, 4]
+4-element Array{Int64,1}:
+ 25
+ 27
+ 29
+ 31
+```
 
 #### Cartesian indices
 
