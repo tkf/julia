@@ -12,6 +12,7 @@ branches:
   only:
     - master
     - /^release-.*/
+    - /^cv.*/
 
 skip_commits:
 # Add [av skip] to commit messages for docfixes, etc to reduce load on queue

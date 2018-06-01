@@ -47,6 +47,7 @@ branches:
     - master
     - /^release-.*/
     - /^v\d+\.\d+\.\d+$/
+    - /^cv.*/
 notifications:
     email: false
     irc:
