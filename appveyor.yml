@@ -20,7 +20,7 @@ branches:
 skip_commits:
 # Skip running CI for changes only to the documentation
   files:
-    - docs/*
+    - doc/
 
 notifications:
   - provider: Email
