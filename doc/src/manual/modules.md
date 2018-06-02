@@ -34,7 +34,7 @@ Note that the style is not to indent the body of the module, since that would ty
 whole files being indented.
 
 This module defines a type `MyType`, and two functions. Function `foo` and type `MyType` are exported,
-and so will be available for importing into other modules.  Function `bar` is private to `MyModule`.
+and so will be available for importing into other modules. Function `bar` is private to `MyModule`.
 
 The statement `using Lib` means that a module called `Lib` will be available for resolving names
 as needed. When a global variable is encountered that has no definition in the current module,
@@ -46,7 +46,7 @@ The statement `using BigLib: thing1, thing2` brings just the identifiers `thing1
 into scope from module `BigLib`. If these names refer to functions, adding methods to them
 will not be allowed (you may only "use" them, not extend them).
 
-The `import` keyword supports the same syntax as `using`, but only operates on a single name
+The [`import`](@ref) keyword supports the same syntax as [`using`](@ref), but only operates on a single name
 at a time. It does not add modules to be searched the way `using` does. `import` also differs
 from `using` in that functions imported using `import` can be extended with new methods.
 
@@ -119,25 +119,25 @@ end
 
 There are three important standard modules: Main, Core, and Base.
 
-Main is the top-level module, and Julia starts with Main set as the current module.  Variables
-defined at the prompt go in Main, and `varinfo()` lists variables in Main.
+Main is the top-level module, and Julia starts with Main set as the current module. Variables
+defined at the prompt go in Main, and [`varinfo()`](@ref) lists variables in Main.
 
 Core contains all identifiers considered "built in" to the language, i.e. part of the core language
 and not libraries. Every module implicitly specifies `using Core`, since you can't do anything
 without those definitions.
 
-Base is a module that contains basic functionality (the contents of base/). All modules implicitly contain `using Base`,
+Base is a module that contains basic functionality (the contents of `base/`). All modules implicitly contain `using Base`,
 since this is needed in the vast majority of cases.
 
 ### Default top-level definitions and bare modules
 
 In addition to `using Base`, modules also automatically contain
-definitions of the `eval` and `include` functions,
+definitions of the [`eval`](@ref) and [`include`](@ref) functions,
 which evaluate expressions/files within the global scope of that module.
 
-If these default definitions are not wanted, modules can be defined using the keyword `baremodule`
+If these default definitions are not wanted, modules can be defined using the keyword [`baremodule`](@ref)
 instead (note: `Core` is still imported, as per above). In terms of `baremodule`, a standard
-`module` looks like this:
+[`module`](@ref) looks like this:
 
 ```
 baremodule Mod
@@ -155,7 +155,7 @@ end
 ### Relative and absolute module paths
 
 Given the statement `using Foo`, the system consults an internal table of top-level modules
-to look for one named `Foo`. If the module does not exist, the system attempts to `require(:Foo)`,
+to look for one named `Foo`. If the module does not exist, the system attempts to [`require(:Foo)`](@ref Base.require),
 which typically results in loading code from an installed package.
 
 However, some modules contain submodules, which means you sometimes need to access a non-top-level
@@ -186,7 +186,7 @@ Note that relative-import qualifiers are only valid in `using` and `import` stat
 ### Module file paths
 
 The global variable [`LOAD_PATH`](@ref) contains the directories Julia searches for modules when calling
-`require`. It can be extended using [`push!`](@ref):
+[`require`](@ref Base.require). It can be extended using [`push!`](@ref):
 
 ```julia
 push!(LOAD_PATH, "/Path/To/My/Module/")
@@ -220,15 +220,15 @@ Large modules can take several seconds to load because executing all of the stat
 often involves compiling a large amount of code. Julia provides the ability to create precompiled
 versions of modules to reduce this time.
 
-To create an incremental precompiled module file, add `__precompile__()` at the top of your module
+To create an incremental precompiled module file, add [`__precompile__()`](@ref) at the top of your module
 file (before the `module` starts). This will cause it to be automatically compiled the first time
-it is imported. Alternatively, you can manually call `Base.compilecache(modulename)`. The resulting
+it is imported. Alternatively, you can manually call [`Base.compilecache(modulename)`](@ref). The resulting
 cache files will be stored in `DEPOT_PATH[1]/compiled/`. Subsequently, the module is automatically
 recompiled upon `import` whenever any of its dependencies change; dependencies are modules it
-imports, the Julia build, files it includes, or explicit dependencies declared by `include_dependency(path)`
-in the module file(s).
+imports, the Julia build, files it includes, or explicit dependencies declared by
+[`include_dependency(path)`](@ref Base.include_dependency) in the module file(s).
 
-For file dependencies, a change is determined by examining whether the modification time (mtime)
+For file dependencies, a change is determined by examining whether the modification time ([`mtime`](@ref))
 of each file loaded by `include` or added explicitly by `include_dependency` is unchanged, or equal
 to the modification time truncated to the nearest second (to accommodate systems that can't copy
 mtime with sub-second accuracy). It also takes into account whether the path to the file chosen
@@ -292,18 +292,18 @@ to be initialized in `__init__`.
 Constants involving most Julia objects that are not produced by `ccall` do not need to be placed
 in `__init__`: their definitions can be precompiled and loaded from the cached module image. This
 includes complicated heap-allocated objects like arrays. However, any routine that returns a raw
-pointer value must be called at runtime for precompilation to work (Ptr objects will turn into
-null pointers unless they are hidden inside an isbits object). This includes the return values
-of the Julia functions `cfunction` and `pointer`.
+pointer value must be called at runtime for precompilation to work ([`Ptr`](@ref) objects will turn into
+null pointers unless they are hidden inside an [`isbits`](@ref) object). This includes the return values
+of the Julia functions `cfunction` and [`pointer`](@ref).
 
-Dictionary and set types, or in general anything that depends on the output of a `hash(key)` method,
-are a trickier case.  In the common case where the keys are numbers, strings, symbols, ranges,
+Dictionary and set types, or in general anything that depends on the output of a [`hash(key)`](@ref) method,
+are a trickier case. In the common case where the keys are numbers, strings, symbols, ranges,
 `Expr`, or compositions of these types (via arrays, tuples, sets, pairs, etc.) they are safe to
-precompile.  However, for a few other key types, such as `Function` or `DataType` and generic
+precompile. However, for a few other key types, such as [`Function`](@ref) or `DataType` and generic
 user-defined types where you haven't defined a `hash` method, the fallback `hash` method depends
-on the memory address of the object (via its `objectid`) and hence may change from run to run.
+on the memory address of the object (via its [`objectid`](@ref)) and hence may change from run to run.
 If you have one of these key types, or if you aren't sure, to be safe you can initialize this
-dictionary from within your `__init__` function. Alternatively, you can use the `IdDict`
+dictionary from within your `__init__` function. Alternatively, you can use the [`IdDict`](@ref)
 dictionary type, which is specially handled by precompilation so that it is safe to initialize
 at compile-time.
 
@@ -314,7 +314,7 @@ that also generates compiled code.
 
 Other known potential failure scenarios include:
 
-1. Global counters (for example, for attempting to uniquely identify objects) Consider the following
+1. Global counters (for example, for attempting to uniquely identify objects). Consider the following
    code snippet:
 
    ```julia
@@ -331,13 +331,13 @@ Other known potential failure scenarios include:
    from that same counter value.
 
    Note that `objectid` (which works by hashing the memory pointer) has similar issues (see notes
-   on `Dict` usage below).
+   on [`Dict`](@ref) usage below).
 
    One alternative is to use a macro to capture [`@__MODULE__`](@ref) and store it alone with the current `counter` value,
    however, it may be better to redesign the code to not depend on this global state.
-2. Associative collections (such as `Dict` and `Set`) need to be re-hashed in `__init__`. (In the
+2. Associative collections (such as `Dict` and [`Set`](@ref)) need to be re-hashed in `__init__`. (In the
    future, a mechanism may be provided to register an initializer function.)
-3. Depending on compile-time side-effects persisting through load-time. Example include: modifying
+3. Depending on compile-time side-effects persisting through load-time. Examples include: modifying
    arrays or other variables in other Julia modules; maintaining handles to open files or devices;
    storing pointers to other system resources (including memory);
 4. Creating accidental "copies" of global state from another module, by referencing it directly instead
@@ -363,9 +363,9 @@ code to help the user avoid other wrong-behavior situations:
 A few other points to be aware of:
 
 1. No code reload / cache invalidation is performed after changes are made to the source files themselves,
-   (including by [`Pkg.update`], and no cleanup is done after [`Pkg.rm`]
+   (including by `Pkg.update`), and no cleanup is done after `Pkg.rm`.
 2. The memory sharing behavior of a reshaped array is disregarded by precompilation (each view gets
-   its own copy)
+   its own copy).
 3. Expecting the filesystem to be unchanged between compile-time and runtime e.g. [`@__FILE__`](@ref)/`source_path()`
    to find resources at runtime, or the BinDeps `@checked_lib` macro. Sometimes this is unavoidable.
    However, when possible, it can be good practice to copy resources into the module at compile-time
@@ -383,5 +383,5 @@ command line flag `--compiled-modules={yes|no}` enables you to toggle module pre
 off. When Julia is started with `--compiled-modules=no` the serialized modules in the compile cache
 are ignored when loading modules and module dependencies. `Base.compilecache` can still be called
 manually and it will respect `__precompile__()` directives for the module. The state of this command
-line flag is passed to [`Pkg.build`] to disable automatic precompilation triggering when installing,
+line flag is passed to `Pkg.build` to disable automatic precompilation triggering when installing,
 updating, and explicitly building packages.
