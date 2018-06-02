@@ -104,7 +104,7 @@ function just_construct_ssa(ci::CodeInfo, code::Vector{Any}, nargs::Int, linetab
     # Union{} call. Then reindex labels.
     idx = 1
     oldidx = 1
-    locs = Int[]
+    changemap = fill(0, length(code))
     while idx <= length(code)
         stmt = code[idx]
         if isexpr(stmt, :(=))
@@ -115,25 +115,20 @@ function just_construct_ssa(ci::CodeInfo, code::Vector{Any}, nargs::Int, linetab
                 insert!(code, idx + 1, ReturnNode())
                 insert!(ci.codelocs, idx + 1, ci.codelocs[idx])
                 insert!(ci.ssavaluetypes, idx + 1, Union{})
-                push!(locs, oldidx + 1)
+                if oldidx < length(changemap)
+                    changemap[oldidx + 1] = 1
+                end
                 idx += 1
             end
         end
         idx += 1
         oldidx += 1
     end
-    if !isempty(locs)
-        reindex_labels!(code) # update labels changed above
-        function incr(id)
-            j = searchsortedfirst(locs, id)
-            if j > length(locs) || locs[j] != id
-                j -= 1
-            end
-            return id + j
-        end
-        for i = 1:length(code)
-            code[i] = ssavalue_increment(code[i], incr)
-        end
+    for i = 2:length(changemap)
+        changemap[i] += changemap[i-1]
+    end
+    if changemap[end] != 0
+        renumber_stuff!(code, changemap)
     end
 
     inbounds_depth = 0 # Number of stacked inbounds

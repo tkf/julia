@@ -36,6 +36,7 @@ function check_op(ir::IRCode, domtree::DomTree, @nospecialize(op), use_bb::Int, 
         end
     elseif isa(op, Union{OldSSAValue, NewSSAValue})
         #@Base.show ir
+        println(ir)
         @verify_error "Left over SSA marker"
         error()
     elseif isa(op, Union{SlotNumber, TypedSlot})
