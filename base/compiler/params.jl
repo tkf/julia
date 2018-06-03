@@ -41,9 +41,9 @@ struct Params
                     inline_nonleaf_penalty::Int = 1000,
                     inline_tupleret_bonus::Int = 400,
                     max_methods::Int = 4,
-                    tupletype_len::Int = 15,
+                    tupletype_len::Int = 31,
                     tupletype_depth::Int = 3,
-                    tuple_splat::Int = 16,
+                    tuple_splat::Int = 32,
                     union_splitting::Int = 4,
                     apply_union_enum::Int = 8)
         return new(Vector{InferenceResult}(),
