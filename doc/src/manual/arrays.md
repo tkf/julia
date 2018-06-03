@@ -23,7 +23,7 @@ sharing](https://en.wikipedia.org/wiki/Evaluation_strategy#Call_by_sharing)
 while this prevents accidental modification by callees of a value in the caller,
 it makes avoiding unwanted copying of arrays difficult. By convention, a
 function name ending with a `!` indicates that it will mutate or destroy the
-value of one or more of its arguments (see, for example, [`sum`](@ref) and [`sum!`](@ref).
+value of one or more of its arguments (see, for example, [`sort`](@ref) and [`sort!`](@ref).
 Callees must make explicit copies to ensure that they don't modify inputs that
 they don't intend to change. Many non- mutating functions are implemented by
 calling a function of the same name with an added `!` at the end on an explicit
