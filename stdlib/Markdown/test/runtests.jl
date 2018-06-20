@@ -221,7 +221,18 @@ World""" |> plain == "Hello\n\n---\n\nWorld\n"
 >
 > ```
 > baz
-> ```""" |> plain == """> foo\n>\n>   * bar\n>\n> ```\n> baz\n> ```\n\n"""
+> ```""" |> plain == """> foo\n>\n> * bar\n>\n> ```\n> baz\n> ```\n\n"""
+
+# Follow Markdown syntax rule: "each subsequent paragraph in a list
+# item must be indented by either 4 spaces or one tab"
+# https://python-markdown.github.io/#differences
+# https://daringfireball.net/projects/markdown/syntax#list
+# https://github.com/JuliaDocs/Documenter.jl/issues/261#issuecomment-398584341
+@test md"""
+* a
+    * b
+    * d
+""" |> plain == "* a\n\n    * b\n    * d\n"
 
 # Terminal (markdown) output
 
@@ -326,8 +337,8 @@ let out =
 
         Some **bolded**
 
-          * list1
-          * list2
+        * list1
+        * list2
         """
 end
 let out =
