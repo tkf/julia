@@ -121,6 +121,15 @@ function iterate end
 
 Convert `x` to a value of type `T`.
 
+It is generally expected that:
+
+* `isequal(convert(T, x), x)`
+* `isless(x, y)` if and only if `isless(convert(T, x), convert(T, y))`
+
+if `convert` does not `throw`.  However, this may not hold when `x` is a floating point
+number.  Types violating these relationships may misbehave with or cannot be supported by
+certain containers or algorithms.
+
 If `T` is an [`Integer`](@ref) type, an [`InexactError`](@ref) will be raised if `x`
 is not representable by `T`, for example if `x` is not integer-valued, or is outside the
 range supported by `T`.
