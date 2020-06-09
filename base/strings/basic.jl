@@ -50,6 +50,18 @@ access this string must satisfy `1 ≤ i ≤ ncodeunits(s)`. Not all such indic
 are valid – they may not be the start of a character, but they will return a
 code unit value when calling `codeunit(s,i)`.
 
+# Examples
+```jldoctest
+julia> ncodeunits("The Julia Language")
+18
+
+julia> ncodeunits("∫eˣ")
+6
+
+julia> ncodeunits('∫'), ncodeunits('e'), ncodeunits('ˣ')
+(3, 1, 2)
+```
+
 See also: [`codeunit`](@ref), [`checkbounds`](@ref), [`sizeof`](@ref),
 [`length`](@ref), [`lastindex`](@ref)
 """
@@ -79,6 +91,15 @@ Return the code unit value in the string `s` at index `i`. Note that
 I.e. the value returned by `codeunit(s, i)` is of the type returned by
 `codeunit(s)`.
 
+# Examples
+```jldoctest
+julia> a = codeunit("Hello", 2)
+0x65
+
+julia> typeof(a)
+UInt8
+```
+
 See also: [`ncodeunits`](@ref), [`checkbounds`](@ref)
 """
 @propagate_inbounds codeunit(s::AbstractString, i::Integer) = typeof(i) === Int ?
@@ -99,7 +120,6 @@ See also: [`getindex`](@ref), [`iterate`](@ref), [`thisind`](@ref),
 [`nextind`](@ref), [`prevind`](@ref), [`length`](@ref)
 
 # Examples
-
 ```jldoctest
 julia> str = "αβγdef";
 
@@ -107,13 +127,13 @@ julia> isvalid(str, 1)
 true
 
 julia> str[1]
-'α': Unicode U+03b1 (category Ll: Letter, lowercase)
+'α': Unicode U+03B1 (category Ll: Letter, lowercase)
 
 julia> isvalid(str, 2)
 false
 
 julia> str[2]
-ERROR: StringIndexError("αβγdef", 2)
+ERROR: StringIndexError: invalid index [2], valid nearby indices [1]=>'α', [3]=>'β'
 Stacktrace:
 [...]
 ```
@@ -157,6 +177,7 @@ julia> sizeof("∀")
 sizeof(s::AbstractString) = ncodeunits(s) * sizeof(codeunit(s))
 firstindex(s::AbstractString) = 1
 lastindex(s::AbstractString) = thisind(s, ncodeunits(s))
+isempty(s::AbstractString) = iszero(ncodeunits(s))
 
 function getindex(s::AbstractString, i::Integer)
     @boundscheck checkbounds(s, i)
@@ -198,15 +219,22 @@ checkbounds(s::AbstractString, I::Union{Integer,AbstractArray}) =
 string() = ""
 string(s::AbstractString) = s
 
-(::Type{Vector{UInt8}})(s::AbstractString) = unsafe_wrap(Vector{UInt8}, String(s))
-(::Type{Array{UInt8}})(s::AbstractString) = unsafe_wrap(Vector{UInt8}, String(s))
-(::Type{Vector{T}})(s::AbstractString) where {T<:AbstractChar} = collect(T, s)
+Vector{UInt8}(s::AbstractString) = unsafe_wrap(Vector{UInt8}, String(s))
+Array{UInt8}(s::AbstractString) = unsafe_wrap(Vector{UInt8}, String(s))
+Vector{T}(s::AbstractString) where {T<:AbstractChar} = collect(T, s)
 
 Symbol(s::AbstractString) = Symbol(String(s))
 Symbol(x...) = Symbol(string(x...))
 
 convert(::Type{T}, s::T) where {T<:AbstractString} = s
 convert(::Type{T}, s::AbstractString) where {T<:AbstractString} = T(s)
+
+## summary ##
+
+function summary(io::IO, s::AbstractString)
+    prefix = isempty(s) ? "empty" : string(ncodeunits(s), "-codeunit")
+    print(io, prefix, " ", typeof(s))
+end
 
 ## string & character concatenation ##
 
@@ -269,7 +297,7 @@ julia> cmp("b", "β")
 function cmp(a::AbstractString, b::AbstractString)
     a === b && return 0
     a, b = Iterators.Stateful(a), Iterators.Stateful(b)
-    for (c, d) in zip(a, b)
+    for (c::AbstractChar, d::AbstractChar) in zip(a, b)
         c ≠ d && return ifelse(c < d, -1, 1)
     end
     isempty(a) && return ifelse(isempty(b), 0, -1)
@@ -325,14 +353,21 @@ isless(a::Symbol, b::Symbol) = cmp(a, b) < 0
     length(s::AbstractString) -> Int
     length(s::AbstractString, i::Integer, j::Integer) -> Int
 
-The number of characters in string `s` from indices `i` through `j`. This is
-computed as the number of code unit indices from `i` to `j` which are valid
-character indices. With only a single string argument, this computes the
-number of characters in the entire string. With `i` and `j` arguments it
+Return the number of characters in string `s` from indices `i` through `j`.
+
+This is computed as the number of code unit indices from `i` to `j` which are
+valid character indices. With only a single string argument, this computes
+the number of characters in the entire string. With `i` and `j` arguments it
 computes the number of indices between `i` and `j` inclusive that are valid
 indices in the string `s`. In addition to in-bounds values, `i` may take the
 out-of-bounds value `ncodeunits(s) + 1` and `j` may take the out-of-bounds
 value `0`.
+
+!!! note
+    The time complexity of this operation is linear in general. That is, it
+    will take the time proportional to the number of bytes or characters in
+    the string because it counts the value on the fly. This is in contrast to
+    the method for arrays, which is a constant-time operation.
 
 See also: [`isvalid`](@ref), [`ncodeunits`](@ref), [`lastindex`](@ref),
 [`thisind`](@ref), [`nextind`](@ref), [`prevind`](@ref)
@@ -384,13 +419,11 @@ julia> thisind("α", 3)
 3
 
 julia> thisind("α", 4)
-ERROR: BoundsError: attempt to access "α"
-  at index [4]
+ERROR: BoundsError: attempt to access 2-codeunit String at index [4]
 [...]
 
 julia> thisind("α", -1)
-ERROR: BoundsError: attempt to access "α"
-  at index [-1]
+ERROR: BoundsError: attempt to access 2-codeunit String at index [-1]
 [...]
 ```
 """
@@ -400,7 +433,7 @@ function thisind(s::AbstractString, i::Int)
     z = ncodeunits(s) + 1
     i == z && return i
     @boundscheck 0 ≤ i ≤ z || throw(BoundsError(s, i))
-    @inbounds while 1 < i && !isvalid(s, i)
+    @inbounds while 1 < i && !(isvalid(s, i)::Bool)
         i -= 1
     end
     return i
@@ -440,8 +473,7 @@ julia> prevind("α", 1)
 0
 
 julia> prevind("α", 0)
-ERROR: BoundsError: attempt to access "α"
-  at index [0]
+ERROR: BoundsError: attempt to access 2-codeunit String at index [0]
 [...]
 
 julia> prevind("α", 2, 2)
@@ -500,8 +532,7 @@ julia> nextind("α", 1)
 3
 
 julia> nextind("α", 3)
-ERROR: BoundsError: attempt to access "α"
-  at index [3]
+ERROR: BoundsError: attempt to access 2-codeunit String at index [3]
 [...]
 
 julia> nextind("α", 0, 2)
@@ -564,17 +595,22 @@ isascii(c::Char) = bswap(reinterpret(UInt32, c)) < 0x80
 isascii(s::AbstractString) = all(isascii, s)
 isascii(c::AbstractChar) = UInt32(c) < 0x80
 
-## string map, filter, has ##
+## string map, filter ##
 
 function map(f, s::AbstractString)
-    out = IOBuffer(sizehint=sizeof(s))
+    out = StringVector(max(4, sizeof(s)÷sizeof(codeunit(s))))
+    index = UInt(1)
     for c in s
         c′ = f(c)
         isa(c′, AbstractChar) || throw(ArgumentError(
-            "map(f, s::AbstractString) requires f to return AbstractChar; try map(f, collect(s)) or a comprehension instead"))
-        write(out, c′::AbstractChar)
+            "map(f, s::AbstractString) requires f to return AbstractChar; " *
+            "try map(f, collect(s)) or a comprehension instead"))
+        index + 3 > length(out) && resize!(out, unsigned(2 * length(out)))
+        index += __unsafe_string!(out, convert(Char, c′), index)
     end
-    String(take!(out))
+    resize!(out, index-1)
+    sizehint!(out, index-1)
+    return String(out)
 end
 
 function filter(f, s::AbstractString)
@@ -592,6 +628,7 @@ end
 
 Get a string consisting of the first `n` characters of `s`.
 
+# Examples
 ```jldoctest
 julia> first("∀ϵ≠0: ϵ²>0", 0)
 ""
@@ -610,6 +647,7 @@ first(s::AbstractString, n::Integer) = @inbounds s[1:min(end, nextind(s, 0, n))]
 
 Get a string consisting of the last `n` characters of `s`.
 
+# Examples
 ```jldoctest
 julia> last("∀ϵ≠0: ϵ²>0", 0)
 ""
@@ -696,7 +734,8 @@ size(s::CodeUnits) = (length(s),)
 elsize(s::CodeUnits{T}) where {T} = sizeof(T)
 @propagate_inbounds getindex(s::CodeUnits, i::Int) = codeunit(s.s, i)
 IndexStyle(::Type{<:CodeUnits}) = IndexLinear()
-iterate(s::CodeUnits, i=1) = (@_propagate_inbounds_meta; i == length(s)+1 ? nothing : (s[i], i+1))
+@inline iterate(s::CodeUnits, i=1) = (i % UInt) - 1 < length(s) ? (@inbounds s[i], i + 1) : nothing
+
 
 write(io::IO, s::CodeUnits) = write(io, s.s)
 
@@ -709,5 +748,17 @@ unsafe_convert(::Type{Ptr{Int8}}, s::CodeUnits{UInt8}) = unsafe_convert(Ptr{Int8
 Obtain a vector-like object containing the code units of a string.
 Returns a `CodeUnits` wrapper by default, but `codeunits` may optionally be defined
 for new string types if necessary.
+
+# Examples
+```jldoctest
+julia> codeunits("Juλia")
+6-element Base.CodeUnits{UInt8,String}:
+ 0x4a
+ 0x75
+ 0xce
+ 0xbb
+ 0x69
+ 0x61
+```
 """
 codeunits(s::AbstractString) = CodeUnits(s)

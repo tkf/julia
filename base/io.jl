@@ -61,17 +61,20 @@ Close an I/O stream. Performs a [`flush`](@ref) first.
 """
 function close end
 function flush end
-function wait_connected end
 function wait_readnb end
-function wait_readbyte end
 function wait_close end
 function bytesavailable end
 
 """
     readavailable(stream)
 
-Read all available data on the stream, blocking the task only if no data is available. The
-result is a `Vector{UInt8,1}`.
+Read available buffered data from a stream. Actual I/O is performed only if no
+data has already been buffered. The result is a `Vector{UInt8}`.
+
+!!! warning
+    The amount of data returned is implementation-dependent; for example it can
+depend on the internal choice of buffer size. Other functions such as [`read`](@ref)
+should generally be used instead.
 """
 function readavailable end
 
@@ -128,6 +131,9 @@ function eof end
 
 Read a single value of type `T` from `io`, in canonical binary representation.
 
+Note that Julia does not convert the endianness for you. Use [`ntoh`](@ref) or
+[`ltoh`](@ref) for this purpose.
+
     read(io::IO, String)
 
 Read the entirety of `io`, as a `String`.
@@ -137,7 +143,7 @@ Read the entirety of `io`, as a `String`.
 julia> io = IOBuffer("JuliaLang is a GitHub organization");
 
 julia> read(io, Char)
-'J': ASCII/Unicode U+004a (category Lu: Letter, uppercase)
+'J': ASCII/Unicode U+004A (category Lu: Letter, uppercase)
 
 julia> io = IOBuffer("JuliaLang is a GitHub organization");
 
@@ -152,8 +158,12 @@ read(stream, t)
     write(filename::AbstractString, x)
 
 Write the canonical binary representation of a value to the given I/O stream or file.
-Return the number of bytes written into the stream.   See also [`print`](@ref) to
+Return the number of bytes written into the stream. See also [`print`](@ref) to
 write a text representation (with an encoding that may depend upon `io`).
+
+The endianness of the written value depends on the endianness of the host system.
+Convert to/from a fixed endianness when writing/reading (e.g. using  [`htol`](@ref) and
+[`ltoh`](@ref)) to get results that are consistent across platforms.
 
 You can write multiple values with the same `write` call. i.e. the following are equivalent:
 
@@ -161,6 +171,24 @@ You can write multiple values with the same `write` call. i.e. the following are
     write(io, x) + write(io, y...)
 
 # Examples
+Consistent serialization:
+```jldoctest
+julia> fname = tempname(); # random temporary filename
+
+julia> open(fname,"w") do f
+           # Make sure we write 64bit integer in little-endian byte order
+           write(f,htol(Int64(42)))
+       end
+8
+
+julia> open(fname,"r") do f
+           # Convert back to host byte order and host integer type
+           Int(ltoh(read(f,Int64)))
+       end
+42
+```
+
+Merging write calls:
 ```jldoctest
 julia> io = IOBuffer();
 
@@ -228,6 +256,82 @@ function unsafe_read(s::IO, p::Ptr{UInt8}, n::UInt)
     nothing
 end
 
+function peek(s::IO, ::Type{T}) where T
+    mark(s)
+    try read(s, T)
+    finally
+        reset(s)
+    end
+end
+
+peek(s) = peek(s, UInt8)
+
+# Generic `open` methods
+
+"""
+    open_flags(; keywords...) -> NamedTuple
+
+Compute the `read`, `write`, `create`, `truncate`, `append` flag value for
+a given set of keyword arguments to [`open`](@ref) a [`NamedTuple`](@ref).
+"""
+function open_flags(;
+    read     :: Union{Bool,Nothing} = nothing,
+    write    :: Union{Bool,Nothing} = nothing,
+    create   :: Union{Bool,Nothing} = nothing,
+    truncate :: Union{Bool,Nothing} = nothing,
+    append   :: Union{Bool,Nothing} = nothing,
+)
+    if write === true && read !== true && append !== true
+        create   === nothing && (create   = true)
+        truncate === nothing && (truncate = true)
+    end
+
+    if truncate === true || append === true
+        write  === nothing && (write  = true)
+        create === nothing && (create = true)
+    end
+
+    write    === nothing && (write    = false)
+    read     === nothing && (read     = !write)
+    create   === nothing && (create   = false)
+    truncate === nothing && (truncate = false)
+    append   === nothing && (append   = false)
+
+    return (
+        read = read,
+        write = write,
+        create = create,
+        truncate = truncate,
+        append = append,
+    )
+end
+
+"""
+    open(f::Function, args...; kwargs....)
+
+Apply the function `f` to the result of `open(args...; kwargs...)` and close the resulting file
+descriptor upon completion.
+
+# Examples
+```jldoctest
+julia> open("myfile.txt", "w") do io
+           write(io, "Hello world!")
+       end;
+
+julia> open(f->read(f, String), "myfile.txt")
+"Hello world!"
+
+julia> rm("myfile.txt")
+```
+"""
+function open(f::Function, args...; kwargs...)
+    io = open(args...; kwargs...)
+    try
+        f(io)
+    finally
+        close(io)
+    end
+end
 
 # Generic wrappers around other IO objects
 abstract type AbstractPipe <: IO end
@@ -247,20 +351,21 @@ readuntil(io::AbstractPipe, arg::AbstractChar; kw...) = readuntil(pipe_reader(io
 readuntil(io::AbstractPipe, arg::AbstractString; kw...) = readuntil(pipe_reader(io), arg; kw...)
 readuntil(io::AbstractPipe, arg::AbstractVector; kw...) = readuntil(pipe_reader(io), arg; kw...)
 readuntil_vector!(io::AbstractPipe, target::AbstractVector, keep::Bool, out) = readuntil_vector!(pipe_reader(io), target, keep, out)
+readbytes!(io::AbstractPipe, target::AbstractVector{UInt8}, n=length(target)) = readbytes!(pipe_reader(io), target, n)
 
 for f in (
         # peek/mark interface
-        :peek, :mark, :unmark, :reset, :ismarked,
+        :mark, :unmark, :reset, :ismarked,
         # Simple reader functions
         :readavailable, :isreadable)
     @eval $(f)(io::AbstractPipe) = $(f)(pipe_reader(io))
 end
+peek(io::AbstractPipe, ::Type{T}) where {T} = peek(pipe_reader(io), T)
 
 iswritable(io::AbstractPipe) = iswritable(pipe_writer(io))
 isopen(io::AbstractPipe) = isopen(pipe_writer(io)) || isopen(pipe_reader(io))
 close(io::AbstractPipe) = (close(pipe_writer(io)); close(pipe_reader(io)))
 wait_readnb(io::AbstractPipe, nb::Int) = wait_readnb(pipe_reader(io), nb)
-wait_readbyte(io::AbstractPipe, byte::UInt8) = wait_readbyte(pipe_reader(io), byte)
 wait_close(io::AbstractPipe) = (wait_close(pipe_writer(io)); wait_close(pipe_reader(io)))
 
 """
@@ -287,7 +392,7 @@ it is always safe to read one byte after seeing `eof` return `false`. `eof` will
 `false` as long as buffered data is still available, even if the remote end of a connection
 is closed.
 """
-eof(io::AbstractPipe) = eof(pipe_reader(io))
+eof(io::AbstractPipe) = eof(pipe_reader(io)::IO)::Bool
 reseteof(io::AbstractPipe) = reseteof(pipe_reader(io))
 
 
@@ -310,8 +415,8 @@ read(filename::AbstractString, args...) = open(io->read(io, args...), filename)
 read(filename::AbstractString, ::Type{T}) where {T} = open(io->read(io, T), filename)
 
 """
-    read!(stream::IO, array::Union{Array, BitArray})
-    read!(filename::AbstractString, array::Union{Array, BitArray})
+    read!(stream::IO, array::AbstractArray)
+    read!(filename::AbstractString, array::AbstractArray)
 
 Read binary data from an I/O stream or file, filling in `array`.
 """
@@ -611,8 +716,8 @@ function read!(s::IO, a::Array{UInt8})
     return a
 end
 
-function read!(s::IO, a::Array{T}) where T
-    if isbitstype(T)
+function read!(s::IO, a::AbstractArray{T}) where T
+    if isbitstype(T) && (a isa Array || a isa FastContiguousSubArray{T,<:Any,<:Array{T}})
         GC.@preserve a unsafe_read(s, pointer(a), sizeof(a))
     else
         for i in eachindex(a)

@@ -223,6 +223,9 @@ end
     push_negotiation::Ptr{Cvoid}       = C_NULL
     transport::Ptr{Cvoid}              = C_NULL
     payload::Ptr{Cvoid}                = C_NULL
+    @static if LibGit2.VERSION >= v"0.99.0"
+        resolve_url::Ptr{Cvoid}        = C_NULL
+    end
 end
 
 """
@@ -1007,6 +1010,7 @@ for (typ, owntyp, sup, cname) in [
                 return obj
             end
         end
+        @eval Base.unsafe_convert(::Type{Ptr{Cvoid}}, x::$typ) = x.ptr
     else
         @eval mutable struct $typ <: $sup
             owner::$owntyp
@@ -1021,7 +1025,8 @@ for (typ, owntyp, sup, cname) in [
                 return obj
             end
         end
-        if isa(owntyp, Expr) && owntyp.args[1] == :Union && owntyp.args[3] == :Nothing
+        @eval Base.unsafe_convert(::Type{Ptr{Cvoid}}, x::$typ) = x.ptr
+        if isa(owntyp, Expr) && owntyp.args[1] === :Union && owntyp.args[3] === :Nothing
             @eval begin
                 $typ(ptr::Ptr{Cvoid}, fin::Bool=true) = $typ(nothing, ptr, fin)
             end
@@ -1205,7 +1210,7 @@ mutable struct UserPasswordCredential <: AbstractCredential
 end
 
 function Base.setproperty!(cred::UserPasswordCredential, name::Symbol, value)
-    if name == :pass
+    if name === :pass
         field = getfield(cred, name)
         Base.shred!(field)
     end
@@ -1240,7 +1245,7 @@ mutable struct SSHCredential <: AbstractCredential
 end
 
 function Base.setproperty!(cred::SSHCredential, name::Symbol, value)
-    if name == :pass
+    if name === :pass
         field = getfield(cred, name)
         Base.shred!(field)
     end

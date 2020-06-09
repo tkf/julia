@@ -22,6 +22,11 @@ end
 
     @test clamp.([0, 1, 2, 3, 4], 1.0, 3.0) == [1.0, 1.0, 2.0, 3.0, 3.0]
     @test clamp.([0 1; 2 3], 1.0, 3.0) == [1.0 1.0; 2.0 3.0]
+
+    @test clamp(-200, Int8) === typemin(Int8)
+    @test clamp(100, Int8) === Int8(100)
+    @test clamp(200, Int8) === typemax(Int8)
+
     begin
         x = [0.0, 1.0, 2.0, 3.0, 4.0]
         clamp!(x, 1, 3)
@@ -170,6 +175,12 @@ end
             @test sqrt(x) ≈ sqrt(big(x))
             @test tan(x) ≈ tan(big(x))
             @test tanh(x) ≈ tanh(big(x))
+            @test sec(x) ≈ sec(big(x))
+            @test csc(x) ≈ csc(big(x))
+            @test secd(x) ≈ secd(big(x))
+            @test cscd(x) ≈ cscd(big(x))
+            @test sech(x) ≈ sech(big(x))
+            @test csch(x) ≈ csch(big(x))
         end
         @testset "Special values" begin
             @test isequal(T(1//4)^T(1//2), T(1//2))
@@ -191,6 +202,9 @@ end
             @test isequal(expm1(T(0)), T(0))
             @test expm1(T(1)) ≈ T(ℯ)-1 atol=10*eps(T)
             @test isequal(hypot(T(3),T(4)), T(5))
+            @test isequal(hypot(floatmax(T),T(1)),floatmax(T))
+            @test isequal(hypot(floatmin(T)*sqrt(eps(T)),T(0)),floatmin(T)*sqrt(eps(T)))
+            @test isequal(floatmin(T)*hypot(1.368423059742933,1.3510496552495361),hypot(floatmin(T)*1.368423059742933,floatmin(T)*1.3510496552495361))
             @test isequal(log(T(1)), T(0))
             @test isequal(log(ℯ,T(1)), T(0))
             @test log(T(ℯ)) ≈ T(1) atol=eps(T)
@@ -208,6 +222,12 @@ end
             @test isequal(sqrt(T(100000000)), T(10000))
             @test isequal(tan(T(0)), T(0))
             @test tan(T(pi)/4) ≈ T(1) atol=eps(T)
+            @test isequal(sec(T(pi)), -one(T))
+            @test isequal(csc(T(pi)/2), one(T))
+            @test isequal(secd(T(180)), -one(T))
+            @test isequal(cscd(T(90)), one(T))
+            @test isequal(sech(log(one(T))), one(T))
+            @test isequal(csch(zero(T)), T(Inf))
         end
         @testset "Inverses" begin
             @test acos(cos(x)) ≈ x
@@ -244,6 +264,12 @@ end
             @test sinh(x) ≈ (exp(x)-exp(-x))/2
             @test tan(x) ≈ sin(x)/cos(x)
             @test tanh(x) ≈ sinh(x)/cosh(x)
+            @test sec(x) ≈ inv(cos(x))
+            @test csc(x) ≈ inv(sin(x))
+            @test secd(x) ≈ inv(cosd(x))
+            @test cscd(x) ≈ inv(sind(x))
+            @test sech(x) ≈ inv(cosh(x))
+            @test csch(x) ≈ inv(sinh(x))
         end
         @testset "Edge cases" begin
             @test isinf(log(zero(T)))
@@ -348,9 +374,14 @@ end
 @testset "degree-based trig functions" begin
     @testset "$T" for T = (Float32,Float64,Rational{Int})
         fT = typeof(float(one(T)))
+        fTsc = typeof( (float(one(T)), float(one(T))) )
         for x = -400:40:400
             @test sind(convert(T,x))::fT ≈ convert(fT,sin(pi/180*x)) atol=eps(deg2rad(convert(fT,x)))
             @test cosd(convert(T,x))::fT ≈ convert(fT,cos(pi/180*x)) atol=eps(deg2rad(convert(fT,x)))
+
+            s,c = sincosd(convert(T,x))
+            @test s::fT ≈ convert(fT,sin(pi/180*x)) atol=eps(deg2rad(convert(fT,x)))
+            @test c::fT ≈ convert(fT,cos(pi/180*x)) atol=eps(deg2rad(convert(fT,x)))
         end
         @testset "sind" begin
             @test sind(convert(T,0.0))::fT === zero(fT)
@@ -365,6 +396,16 @@ end
             @test cosd(convert(T,270))::fT === zero(fT)
             @test cosd(convert(T,-90))::fT === zero(fT)
             @test cosd(convert(T,-270))::fT === zero(fT)
+        end
+        @testset "sincosd" begin
+            @test sincosd(convert(T,-360))::fTsc === ( -zero(fT),  one(fT) )
+            @test sincosd(convert(T,-270))::fTsc === (   one(fT), zero(fT) )
+            @test sincosd(convert(T,-180))::fTsc === ( -zero(fT), -one(fT) )
+            @test sincosd(convert(T, -90))::fTsc === (  -one(fT), zero(fT) )
+            @test sincosd(convert(T,   0))::fTsc === (  zero(fT),  one(fT) )
+            @test sincosd(convert(T,  90))::fTsc === (   one(fT), zero(fT) )
+            @test sincosd(convert(T, 180))::fTsc === (  zero(fT), -one(fT) )
+            @test sincosd(convert(T, 270))::fTsc === (  -one(fT), zero(fT) )
         end
 
         @testset "sinpi and cospi" begin
@@ -398,6 +439,9 @@ end
             T == Rational{Int} && @test sinpi(5//6) == 0.5
         end
     end
+    scdm = sincosd(missing)
+    @test ismissing(scdm[1])
+    @test ismissing(scdm[2])
 end
 
 @testset "Integer args to sinpi/cospi/sinc/cosc" begin
@@ -451,17 +495,30 @@ end
 
 @testset "evalpoly" begin
     @test @evalpoly(2,3,4,5,6) == 3+2*(4+2*(5+2*6)) == @evalpoly(2+0im,3,4,5,6)
-    @test let evalcounts=0
-              @evalpoly(begin
-                            evalcounts += 1
-                            4
-                        end, 1,2,3,4,5)
-              evalcounts
-          end == 1
     a0 = 1
     a1 = 2
     c = 3
     @test @evalpoly(c, a0, a1) == 7
+    @test @evalpoly(1, 2) == 2
+end
+
+@testset "evalpoly real" begin
+    for x in -1.0:2.0, p1 in -3.0:3.0, p2 in -3.0:3.0, p3 in -3.0:3.0
+        evpm = @evalpoly(x, p1, p2, p3)
+        @test evalpoly(x, (p1, p2, p3)) == evpm
+        @test evalpoly(x, [p1, p2, p3]) == evpm
+    end
+end
+
+@testset "evalpoly complex" begin
+    for x in -1.0:2.0, y in -1.0:2.0, p1 in -3.0:3.0, p2 in -3.0:3.0, p3 in -3.0:3.0
+        z = x + im * y
+        evpm = @evalpoly(z, p1, p2, p3)
+        @test evalpoly(z, (p1, p2, p3)) == evpm
+        @test evalpoly(z, [p1, p2, p3]) == evpm
+    end
+    @test evalpoly(1+im, (2,)) == 2
+    @test evalpoly(1+im, [2,]) == 2
 end
 
 @testset "cis" begin
@@ -479,6 +536,9 @@ end
         @test modf( convert(elty,1.2) )[2] ≈ convert(elty,1.0)
         @test modf( convert(elty,1.0) )[1] ≈ convert(elty,0.0)
         @test modf( convert(elty,1.0) )[2] ≈ convert(elty,1.0)
+        @test isequal(modf( convert(elty,-Inf) ), (-0.0, -Inf))
+        @test isequal(modf( convert(elty,Inf) ), (0.0, Inf))
+        @test isequal(modf( convert(elty,NaN) ), (NaN, NaN))
     end
 end
 
@@ -610,10 +670,16 @@ end
     @test exp10(Float16(1.0)) === Float16(exp10(1.0))
 end
 
-# #22742: updated isapprox semantics
-@test !isapprox(1.0, 1.0+1e-12, atol=1e-14)
-@test isapprox(1.0, 1.0+0.5*sqrt(eps(1.0)))
-@test !isapprox(1.0, 1.0+1.5*sqrt(eps(1.0)), atol=sqrt(eps(1.0)))
+@testset "isapprox" begin
+  # #22742: updated isapprox semantics
+  @test !isapprox(1.0, 1.0+1e-12, atol=1e-14)
+  @test isapprox(1.0, 1.0+0.5*sqrt(eps(1.0)))
+  @test !isapprox(1.0, 1.0+1.5*sqrt(eps(1.0)), atol=sqrt(eps(1.0)))
+
+  # #13132: Use of `norm` kwarg for scalar arguments
+  @test isapprox(1, 1+1.0e-12, norm=abs)
+  @test !isapprox(1, 1+1.0e-12, norm=x->1)
+end
 
 # test AbstractFloat fallback pr22716
 struct Float22716{T<:AbstractFloat} <: AbstractFloat
@@ -981,10 +1047,17 @@ end
     end
 end
 
-isdefined(Main, :Furlongs) || @eval Main include("testhelpers/Furlongs.jl")
-using .Main.Furlongs
-@test hypot(Furlong(0), Furlong(0)) == Furlong(0.0)
-@test hypot(Furlong(3), Furlong(4)) == Furlong(5.0)
-@test hypot(Furlong(NaN), Furlong(Inf)) == Furlong(Inf)
-@test hypot(Furlong(Inf), Furlong(NaN)) == Furlong(Inf)
-@test hypot(Furlong(Inf), Furlong(Inf)) == Furlong(Inf)
+@testset "hypot" begin
+    @test hypot(0, 0) == 0.0
+    @test hypot(3, 4) == 5.0
+    @test hypot(NaN, Inf) == Inf
+    @test hypot(Inf, NaN) == Inf
+    @test hypot(Inf, Inf) == Inf
+
+    isdefined(Main, :Furlongs) || @eval Main include("testhelpers/Furlongs.jl")
+    using .Main.Furlongs
+    @test hypot(Furlong(0), Furlong(0)) == Furlong(0.0)
+    @test hypot(Furlong(3), Furlong(4)) == Furlong(5.0)
+    @test hypot(Complex(3), Complex(4)) === 5.0
+    @test hypot(Complex(6, 8), Complex(8, 6)) === 10.0*sqrt(2)
+end

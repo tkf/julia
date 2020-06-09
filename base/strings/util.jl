@@ -50,8 +50,7 @@ function startswith(a::Union{String, SubString{String}},
     cub = ncodeunits(b)
     if ncodeunits(a) < cub
         false
-    elseif ccall(:memcmp, Int32, (Ptr{UInt8}, Ptr{UInt8}, UInt),
-                 pointer(a), pointer(b), sizeof(b)) == 0
+    elseif _memcmp(a, b, sizeof(b)) == 0
         nextind(a, cub) == cub + 1
     else
         false
@@ -64,13 +63,80 @@ function endswith(a::Union{String, SubString{String}},
     astart = ncodeunits(a) - ncodeunits(b) + 1
     if astart < 1
         false
-    elseif ccall(:memcmp, Int32, (Ptr{UInt8}, Ptr{UInt8}, UInt),
-                 pointer(a, astart), pointer(b), sizeof(b)) == 0
+    elseif GC.@preserve(a, _memcmp(pointer(a, astart), b, sizeof(b))) == 0
         thisind(a, astart) == astart
     else
         false
     end
 end
+
+"""
+    contains(haystack::AbstractString, needle)
+
+Return `true` if `haystack` contains `needle`.
+This is the same as `occursin(needle, haystack)`, but is provided for consistency with
+`startswith(haystack, needle)` and `endswith(haystack, needle)`.
+
+# Examples
+```jldoctest
+julia> contains("JuliaLang is pretty cool!", "Julia")
+true
+
+julia> contains("JuliaLang is pretty cool!", 'a')
+true
+
+julia> contains("aba", r"a.a")
+true
+
+julia> contains("abba", r"a.a")
+false
+```
+
+!!! compat "Julia 1.5"
+    The `contains` function requires at least Julia 1.5.
+"""
+contains(haystack::AbstractString, needle) = occursin(needle, haystack)
+
+"""
+    endswith(suffix)
+
+Create a function that checks whether its argument ends with `suffix`, i.e.
+a function equivalent to `y -> endswith(y, suffix)`.
+
+The returned function is of type `Base.Fix2{typeof(endswith)}`, which can be
+used to implement specialized methods.
+
+!!! compat "Julia 1.5"
+    The single argument `endswith(suffix)` requires at least Julia 1.5.
+
+"""
+endswith(s) = Base.Fix2(endswith, s)
+
+"""
+    startswith(prefix)
+
+Create a function that checks whether its argument starts with `prefix`, i.e.
+a function equivalent to `y -> startswith(y, prefix)`.
+
+The returned function is of type `Base.Fix2{typeof(startswith)}`, which can be
+used to implement specialized methods.
+
+!!! compat "Julia 1.5"
+    The single argument `startswith(prefix)` requires at least Julia 1.5.
+
+"""
+startswith(s) = Base.Fix2(startswith, s)
+
+"""
+    contains(needle)
+
+Create a function that checks whether its argument contains `needle`, i.e.
+a function equivalent to `haystack -> contains(haystack, needle)`.
+
+The returned function is of type `Base.Fix2{typeof(contains)}`, which can be
+used to implement specialized methods.
+"""
+contains(needle) = Base.Fix2(contains, needle)
 
 """
     chop(s::AbstractString; head::Integer = 0, tail::Integer = 1)
@@ -106,7 +172,7 @@ end
 # chop(s::AbstractString) = SubString(s, firstindex(s), prevind(s, lastindex(s)))
 
 """
-    chomp(s::AbstractString)
+    chomp(s::AbstractString) -> SubString
 
 Remove a single trailing newline from a string.
 
@@ -135,8 +201,8 @@ function chomp(s::String)
 end
 
 """
-    lstrip([pred=isspace,] str::AbstractString)
-    lstrip(str::AbstractString, chars)
+    lstrip([pred=isspace,] str::AbstractString) -> SubString
+    lstrip(str::AbstractString, chars) -> SubString
 
 Remove leading characters from `str`, either those specified by `chars` or those for
 which the function `pred` returns `true`.
@@ -167,8 +233,8 @@ lstrip(s::AbstractString) = lstrip(isspace, s)
 lstrip(s::AbstractString, chars::Chars) = lstrip(in(chars), s)
 
 """
-    rstrip([pred=isspace,] str::AbstractString)
-    rstrip(str::AbstractString, chars)
+    rstrip([pred=isspace,] str::AbstractString) -> SubString
+    rstrip(str::AbstractString, chars) -> SubString
 
 Remove trailing characters from `str`, either those specified by `chars` or those for
 which the function `pred` returns `true`.
@@ -198,8 +264,8 @@ rstrip(s::AbstractString) = rstrip(isspace, s)
 rstrip(s::AbstractString, chars::Chars) = rstrip(in(chars), s)
 
 """
-    strip([pred=isspace,] str::AbstractString)
-    strip(str::AbstractString, chars)
+    strip([pred=isspace,] str::AbstractString) -> SubString
+    strip(str::AbstractString, chars) -> SubString
 
 Remove leading and trailing characters from `str`, either those specified by `chars` or
 those for which the function `pred` returns `true`.
@@ -245,7 +311,7 @@ function lpad(
     n::Integer,
     p::Union{AbstractChar,AbstractString}=' ',
 ) :: String
-    m = n - length(s)
+    m = signed(n) - length(s)
     m ≤ 0 && return string(s)
     l = length(p)
     q, r = divrem(m, l)
@@ -272,7 +338,7 @@ function rpad(
     n::Integer,
     p::Union{AbstractChar,AbstractString}=' ',
 ) :: String
-    m = n - length(s)
+    m = signed(n) - length(s)
     m ≤ 0 && return string(s)
     l = length(p)
     q, r = divrem(m, l)
@@ -302,7 +368,7 @@ See also [`rsplit`](@ref).
 julia> a = "Ma.rch"
 "Ma.rch"
 
-julia> split(a,".")
+julia> split(a, ".")
 2-element Array{SubString{String},1}:
  "Ma"
  "rch"
@@ -326,8 +392,8 @@ end
 function _split(str::AbstractString, splitter, limit::Integer, keepempty::Bool, strs::Array)
     i = 1 # firstindex(str)
     n = lastindex(str)
-    r = something(findfirst(splitter,str), 0)
-    if r != 0:-1
+    r = findfirst(splitter,str)
+    if !isnothing(r)
         j, k = first(r), nextind(str,last(r))
         while 0 < j <= n && length(strs) != limit-1
             if i < k
@@ -337,8 +403,8 @@ function _split(str::AbstractString, splitter, limit::Integer, keepempty::Bool, 
                 i = k
             end
             (k <= j) && (k = nextind(str,j))
-            r = something(findnext(splitter,str,k), 0)
-            r == 0:-1 && break
+            r = findnext(splitter,str,k)
+            isnothing(r) && break
             j, k = first(r), nextind(str,last(r))
         end
     end
@@ -364,7 +430,7 @@ Similar to [`split`](@ref), but starting from the end of the string.
 julia> a = "M.a.r.c.h"
 "M.a.r.c.h"
 
-julia> rsplit(a,".")
+julia> rsplit(a, ".")
 5-element Array{SubString{String},1}:
  "M"
  "a"
@@ -372,11 +438,11 @@ julia> rsplit(a,".")
  "c"
  "h"
 
-julia> rsplit(a,".";limit=1)
+julia> rsplit(a, "."; limit=1)
 1-element Array{SubString{String},1}:
  "M.a.r.c.h"
 
-julia> rsplit(a,".";limit=2)
+julia> rsplit(a, "."; limit=2)
 2-element Array{SubString{String},1}:
  "M.a.r.c"
  "h"
@@ -428,6 +494,9 @@ replace(str::String, pat_repl::Pair{<:Union{Tuple{Vararg{<:AbstractChar}},
         count::Integer=typemax(Int)) =
     replace(str, in(first(pat_repl)) => last(pat_repl), count=count)
 
+_pat_replacer(x) = x
+_free_pat_replacer(x) = nothing
+
 function replace(str::String, pat_repl::Pair; count::Integer=typemax(Int))
     pattern, repl = pat_repl
     count == 0 && return str
@@ -435,12 +504,13 @@ function replace(str::String, pat_repl::Pair; count::Integer=typemax(Int))
     n = 1
     e = lastindex(str)
     i = a = firstindex(str)
+    pattern = _pat_replacer(pattern)
     r = something(findnext(pattern,str,i), 0)
     j, k = first(r), last(r)
     out = IOBuffer(sizehint=floor(Int, 1.2sizeof(str)))
     while j != 0
         if i == a || i <= k
-            unsafe_write(out, pointer(str, i), UInt(j-i))
+            GC.@preserve str unsafe_write(out, pointer(str, i), UInt(j-i))
             _replace(out, repl, str, r, pattern)
         end
         if k < j
@@ -455,6 +525,7 @@ function replace(str::String, pat_repl::Pair; count::Integer=typemax(Int))
         j, k = first(r), last(r)
         n += 1
     end
+    _free_pat_replacer(pattern)
     write(out, SubString(str,i))
     String(take!(out))
 end
@@ -467,7 +538,7 @@ If `count` is provided, replace at most `count` occurrences.
 `pat` may be a single character, a vector or a set of characters, a string,
 or a regular expression.
 If `r` is a function, each occurrence is replaced with `r(s)`
-where `s` is the matched substring (when `pat`is a `Regex` or `AbstractString`) or
+where `s` is the matched substring (when `pat` is a `Regex` or `AbstractString`) or
 character (when `pat` is an `AbstractChar` or a collection of `AbstractChar`).
 If `pat` is a regular expression and `r` is a [`SubstitutionString`](@ref), then capture group
 references in `r` are replaced with the corresponding matched text.

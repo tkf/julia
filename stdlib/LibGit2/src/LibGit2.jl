@@ -7,7 +7,7 @@ module LibGit2
 
 import Base: ==
 using Base: something, notnothing
-using Base.Printf: @printf
+using Printf: @printf
 
 export with, GitRepo, GitConfig
 
@@ -728,7 +728,7 @@ function merge!(repo::GitRepo;
                                "There is no fetch reference for this branch."))
             end
             Base.map(fh->GitAnnotated(repo,fh), fheads)
-        else # merge commitish
+        else # merge committish
             [GitAnnotated(repo, committish)]
         end
     else

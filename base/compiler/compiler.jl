@@ -5,7 +5,7 @@ getfield(getfield(Main, :Core), :eval)(getfield(Main, :Core), :(baremodule Compi
 using Core.Intrinsics, Core.IR
 
 import Core: print, println, show, write, unsafe_write, stdout, stderr,
-             _apply, svec, apply_type, Builtin, IntrinsicFunction, MethodInstance, CodeInstance
+             _apply, _apply_iterate, svec, apply_type, Builtin, IntrinsicFunction, MethodInstance, CodeInstance
 
 const getproperty = getfield
 const setproperty! = setfield!
@@ -69,6 +69,8 @@ include("abstractarray.jl")
 include("bitarray.jl")
 include("bitset.jl")
 include("abstractdict.jl")
+include("iddict.jl")
+include("idset.jl")
 include("abstractset.jl")
 include("iterators.jl")
 using .Iterators: zip, enumerate
@@ -92,12 +94,13 @@ using .Sort
 # compiler #
 ############
 
+include("compiler/types.jl")
 include("compiler/utilities.jl")
 include("compiler/validation.jl")
 
 include("compiler/inferenceresult.jl")
-include("compiler/params.jl")
 include("compiler/inferencestate.jl")
+include("compiler/cicache.jl")
 
 include("compiler/typeutils.jl")
 include("compiler/typelimits.jl")
@@ -109,7 +112,11 @@ include("compiler/typeinfer.jl")
 include("compiler/optimize.jl") # TODO: break this up further + extract utilities
 
 include("compiler/bootstrap.jl")
-ccall(:jl_set_typeinf_func, Cvoid, (Any,), typeinf_ext)
+ccall(:jl_set_typeinf_func, Cvoid, (Any,), typeinf_ext_toplevel)
+
+include("compiler/parsing.jl")
+Core.eval(Core, :(_parse = Compiler.fl_parse))
 
 end # baremodule Compiler
 ))
+

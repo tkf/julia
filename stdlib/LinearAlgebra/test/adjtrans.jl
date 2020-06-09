@@ -271,7 +271,7 @@ end
 
 @testset "Adjoint and Transpose vector vec methods" begin
     intvec = [1, 2]
-    @test vec(Adjoint(intvec)) == intvec
+    @test vec(Adjoint(intvec)) === intvec
     @test vec(Transpose(intvec)) === intvec
     cvec = [1 + 1im]
     @test vec(cvec')[1] == cvec[1]'
@@ -483,6 +483,31 @@ end
                   "$t of "*sprint((io, t) -> show(io, MIME"text/plain"(), t), parent(Fop))
 end
 
+@testset "strided transposes" begin
+    for t in (Adjoint, Transpose)
+        @test strides(t(rand(3))) == (3, 1)
+        @test strides(t(rand(3,2))) == (3, 1)
+        @test strides(t(view(rand(3, 2), :))) == (6, 1)
+        @test strides(t(view(rand(3, 2), :, 1:2))) == (3, 1)
+
+        A = rand(3)
+        @test pointer(t(A)) === pointer(A)
+        B = rand(3,1)
+        @test pointer(t(B)) === pointer(B)
+    end
+    @test_throws MethodError strides(Adjoint(rand(3) .+ rand(3).*im))
+    @test_throws MethodError strides(Adjoint(rand(3, 2) .+ rand(3, 2).*im))
+    @test strides(Transpose(rand(3) .+ rand(3).*im)) == (3, 1)
+    @test strides(Transpose(rand(3, 2) .+ rand(3, 2).*im)) == (3, 1)
+
+    C = rand(3) .+ rand(3).*im
+    @test_throws ErrorException pointer(Adjoint(C))
+    @test pointer(Transpose(C)) === pointer(C)
+    D = rand(3,2) .+ rand(3,2).*im
+    @test_throws ErrorException pointer(Adjoint(D))
+    @test pointer(Transpose(D)) === pointer(D)
+end
+
 const BASE_TEST_PATH = joinpath(Sys.BINDIR, "..", "share", "julia", "test")
 isdefined(Main, :OffsetArrays) || @eval Main include(joinpath($(BASE_TEST_PATH), "testhelpers", "OffsetArrays.jl"))
 using .Main.OffsetArrays
@@ -502,6 +527,27 @@ using .Main.OffsetArrays
     @test s[1, 0] ==  0
     @test_throws BoundsError s[1,-4]
     @test_throws BoundsError s[1, 4]
+end
+
+@testset "specialized conj of Adjoint/Transpose" begin
+    realmat = [1 2; 3 4]
+    complexmat = ComplexF64[1+im 2; 3 4-im]
+    nested = [[complexmat] [-complexmat]; [0complexmat] [3complexmat]]
+    @testset "AdjOrTrans{...,$(typeof(i))}" for i in (
+                                                      realmat, vec(realmat),
+                                                      complexmat, vec(complexmat),
+                                                      nested, vec(nested),
+                                                     )
+        for (t,type) in ((transpose, Adjoint), (adjoint, Transpose))
+            M = t(i)
+            @test conj(M) isa type
+            @test conj(M) == conj(collect(M))
+            @test conj(conj(M)) === M
+        end
+    end
+    # test if `conj(transpose(::Hermitian))` is a no-op
+    hermitian = Hermitian([1 2+im; 2-im 3])
+    @test conj(transpose(hermitian)) === hermitian
 end
 
 end # module TestAdjointTranspose

@@ -18,22 +18,20 @@ module Docs
 
 Functions, methods and types can be documented by placing a string before the definition:
 
-    \"""
+    \"\"\"
     # The Foo Function
     `foo(x)`: Foo the living hell out of `x`.
-    \"""
+    \"\"\"
     foo(x) = ...
 
-The `@doc` macro can be used directly to both set and retrieve documentation / metadata. By
-default, documentation is written as Markdown, but any object can be placed before the
-arrow. For example:
+The `@doc` macro can be used directly to both set and retrieve documentation / metadata.
+The macro has special parsing so that the documented object may occur on the next line:
 
-    @doc "blah" ->
+    @doc "blah"
     function foo() ...
 
-The `->` is not required if the object is on the same line, e.g.
-
-    @doc "foo" foo
+By default, documentation is written as Markdown, but any object can be used as
+the first argument.
 
 ## Documenting objects after they are defined
 You can document an object after its definition by
@@ -64,7 +62,7 @@ include("bindings.jl")
 
 import .Base.Meta: quot, isexpr
 import .Base: Callable, with_output_color
-using .Base: RefValue
+using .Base: RefValue, mapany
 import ..CoreDocs: lazy_iterpolate
 
 export doc
@@ -73,12 +71,13 @@ export doc
 
 const modules = Module[]
 const META    = gensym(:meta)
+const METAType = IdDict{Any,Any}
 
-meta(m::Module) = isdefined(m, META) ? getfield(m, META) : IdDict()
+meta(m::Module) = isdefined(m, META) ? getfield(m, META)::METAType : METAType()
 
 function initmeta(m::Module)
     if !isdefined(m, META)
-        Core.eval(m, :(const $META = $(IdDict())))
+        Core.eval(m, :(const $META = $(METAType())))
         push!(modules, m)
     end
     nothing
@@ -97,7 +96,7 @@ function signature!(tv, expr::Expr)
             push!(sig.args[end].args, argtype(arg))
         end
         if isexpr(expr.args[1], :curly) && isempty(tv)
-            append!(tv, tvar.(expr.args[1].args[2:end]))
+            append!(tv, mapany(tvar, expr.args[1].args[2:end]))
         end
         for i = length(tv):-1:1
             push!(sig.args, :(Tuple{$(tv[i].args[1])}))
@@ -107,7 +106,7 @@ function signature!(tv, expr::Expr)
         end
         return sig
     elseif isexpr(expr, :where)
-        append!(tv, tvar.(expr.args[2:end]))
+        append!(tv, mapany(tvar, expr.args[2:end]))
         return signature!(tv, expr.args[1])
     else
         return signature!(tv, expr.args[1])
@@ -120,6 +119,12 @@ signature(@nospecialize other) = signature!([], other)
 function argtype(expr::Expr)
     isexpr(expr, :(::))  && return expr.args[end]
     isexpr(expr, :(...)) && return :(Vararg{$(argtype(expr.args[1]))})
+    if isexpr(expr, :meta) && length(expr.args) == 2
+        a1 = expr.args[1]
+        if a1 === :nospecialize || a1 === :specialize
+            return argtype(expr.args[2])
+        end
+    end
     return argtype(expr.args[1])
 end
 argtype(@nospecialize other) = :Any
@@ -200,9 +205,9 @@ mutable struct MultiDoc
     "Ordered (via definition order) vector of object signatures."
     order::Vector{Type}
     "Documentation for each object. Keys are signatures."
-    docs::IdDict{Any,Any}
+    docs::METAType
 
-    MultiDoc() = new(Type[], IdDict())
+    MultiDoc() = new(Type[], METAType())
 end
 
 # Docstring registration.
@@ -327,13 +332,14 @@ function metadata(__source__, __module__, expr, ismodule)
     end
     if isexpr(expr, :struct)
         # Field docs for concrete types.
-        fields = []
+        P = Pair{Any,Any}
+        fields = P[]
         last_docstr = nothing
         for each in expr.args[3].args
             if isa(each, Symbol) || isexpr(each, :(::))
                 # a field declaration
                 if last_docstr !== nothing
-                    push!(fields, (namify(each), last_docstr))
+                    push!(fields, P(namify(each), last_docstr))
                     last_docstr = nothing
                 end
             elseif isexpr(each, :function) || isexpr(each, :(=))
@@ -344,7 +350,7 @@ function metadata(__source__, __module__, expr, ismodule)
                 last_docstr = each
             end
         end
-        dict = :($(Dict)($([:($(Pair)($(quot(f)), $d)) for (f, d) in fields]...)))
+        dict = :($(Dict)($([(:($(P)($(quot(f)), $d)))::Expr for (f, d) in fields]...)))
         push!(args, :($(Pair)(:fields, $dict)))
     end
     return :($(Dict)($(args...)))
@@ -366,13 +372,15 @@ end
 
 function calldoc(__source__, __module__, str, def::Expr)
     @nospecialize str
-    args = def.args[2:end]
+    args = callargs(def)
     if isempty(args) || all(validcall, args)
         objectdoc(__source__, __module__, str, nothing, def, signature(def))
     else
         docerror(def)
     end
 end
+callargs(ex::Expr) = isexpr(ex, :where) ? callargs(ex.args[1]) :
+    isexpr(ex, :call) ? ex.args[2:end] : error("Invalid expression to callargs: $ex")
 validcall(x) = isa(x, Symbol) || isexpr(x, (:(::), :..., :kw, :parameters))
 
 function moduledoc(__source__, __module__, meta, def, def′::Expr)
@@ -502,6 +510,12 @@ function docm(source::LineNumberNode, mod::Module, ex)
     end
 end
 
+# iscallexpr checks if an expression is a :call expression. The call expression may be
+# also part of a :where expression, so it unwraps the :where layers until it reaches the
+# "actual" expression
+iscallexpr(ex::Expr) = isexpr(ex, :where) ? iscallexpr(ex.args[1]) : isexpr(ex, :call)
+iscallexpr(ex) = false
+
 function docm(source::LineNumberNode, mod::Module, meta, ex, define::Bool = true)
     @nospecialize meta ex
     # Some documented expressions may be decorated with macro calls which obscure the actual
@@ -530,9 +544,14 @@ function docm(source::LineNumberNode, mod::Module, meta, ex, define::Bool = true
     #   function f end
     #   f(...)
     #
-    isexpr(x, FUNC_HEADS) && is_signature(x.args[1])   ? objectdoc(source, mod, meta, def, x, signature(x)) :
+    # Including if the "call" expression is wrapped in "where" expression(s) (#32960), i.e.
+    #
+    #   f(::T) where T
+    #   f(::T, ::U) where T where U
+    #
+    isexpr(x, FUNC_HEADS) && is_signature(x.args[1]) ? objectdoc(source, mod, meta, def, x, signature(x)) :
     isexpr(x, [:function, :macro])  && !isexpr(x.args[1], :call) ? objectdoc(source, mod, meta, def, x) :
-    isexpr(x, :call)                                   ? calldoc(source, mod, meta, x) :
+    iscallexpr(x) ? calldoc(source, mod, meta, x) :
 
     # Type definitions.
     #

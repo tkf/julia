@@ -9,6 +9,7 @@ using Random
     @test iterate(p)[1] == 10
     @test iterate(p, iterate(p)[2])[1] == 20
     @test iterate(p, iterate(p, iterate(p)[2])[2]) == nothing
+    @test firstindex(p) == 1
     @test lastindex(p) == length(p) == 2
     @test Base.indexed_iterate(p, 1, nothing) == (10,2)
     @test Base.indexed_iterate(p, 2, nothing) == (20,3)
@@ -29,6 +30,7 @@ using Random
     @test last(p) == 20
     @test eltype(p) == Int
     @test eltype(4 => 5.6) == Union{Int,Float64}
+    @test vcat(1 => 2.0, 1.0 => 2) == [1.0 => 2.0, 1.0 => 2.0]
 end
 
 @testset "Dict" begin
@@ -275,6 +277,13 @@ end
 
     @test ismissing(Dict(1=>missing) == Dict(1=>missing))
     @test isequal(Dict(1=>missing), Dict(1=>missing))
+    d = Dict(1=>missing)
+    @test ismissing(d == d)
+    d = Dict(1=>[missing])
+    @test ismissing(d == d)
+    d = Dict(1=>NaN)
+    @test d != d
+    @test isequal(d, d)
 
     @test Dict(missing=>1) == Dict(missing=>1)
     @test isequal(Dict(missing=>1), Dict(missing=>1))
@@ -299,6 +308,13 @@ end
     end == 16
 
     @test d == Dict(8=>19, 19=>2, 42=>4)
+end
+
+@testset "getkey" begin
+   h = Dict(1=>2, 3 => 6, 5=>10)
+   @test getkey(h, 1, 7) == 1
+   @test getkey(h, 4, 6) == 6
+   @test getkey(h, "1", 8) == 8
 end
 
 @testset "show" begin
@@ -416,7 +432,7 @@ mutable struct T10647{T}; x::T; end
     a[1] = a
     a[a] = 2
     a[3] = T10647(a)
-    @test a == a
+    @test isequal(a, a)
     show(IOBuffer(), a)
     Base.show(Base.IOContext(IOBuffer(), :limit => true), a)
     Base.show(IOBuffer(), a)
@@ -440,7 +456,7 @@ end
 
     ca = copy(a)
     @test length(ca) == length(a)
-    @test ca == a
+    @test isequal(ca, a)
     @test ca !== a # make sure they are different objects
 
     ca = empty!(ca)
@@ -481,7 +497,7 @@ end
 
     ca = copy(a)
     @test length(ca) == length(a)
-    @test ca == a
+    @test isequal(ca, a)
     @test ca !== a # make sure they are different objects
 
     ca = empty!(ca)
@@ -702,6 +718,16 @@ import Base.ImmutableDict
 
     @test_throws KeyError d[k1]
     @test_throws KeyError d1["key2"]
+
+    v = [k1 => v1, k2 => v2]
+    d5 = ImmutableDict(v...)
+    @test d5 == d2
+    @test reverse(collect(d5)) == v
+    d6 = ImmutableDict(:a => 1, :b => 3, :a => 2)
+    @test d6[:a] == 2
+    @test d6[:b] == 3
+
+    @test !haskey(ImmutableDict(-0.0=>1), 0.0)
 end
 
 @testset "filtering" begin
@@ -818,13 +844,21 @@ Dict(1 => rand(2,3), 'c' => "asdf") # just make sure this does not trigger a dep
     @test isa(WeakKeyDict(A=>2, B=>3, C=>4), WeakKeyDict{Array{Int,1},Int})
     @test WeakKeyDict(a=>i+1 for (i,a) in enumerate([A,B,C]) ) == wkd
     @test WeakKeyDict([(A,2), (B,3), (C,4)]) == wkd
+    @test WeakKeyDict{typeof(A), Int64}(Pair(A,2), Pair(B,3), Pair(C,4)) == wkd
     @test WeakKeyDict(Pair(A,2), Pair(B,3), Pair(C,4)) == wkd
+    D = [[4.0]]
+    @test WeakKeyDict(Pair(A,2), Pair(B,3), Pair(D,4.0)) isa WeakKeyDict{Any, Any}
+    @test isa(WeakKeyDict(Pair(A,2), Pair(B,3.0), Pair(C,4)), WeakKeyDict{Array{Int,1},Any})
+    @test isa(WeakKeyDict(Pair(convert(Vector{Number}, A),2), Pair(B,3), Pair(C,4)), WeakKeyDict{Any,Int})
     @test copy(wkd) == wkd
 
     @test length(wkd) == 3
     @test !isempty(wkd)
     res = pop!(wkd, C)
     @test res == 4
+    @test length(wkd) == 2
+    res = pop!(wkd, C, 3)
+    @test res == 3
     @test C ∉ keys(wkd)
     @test 4 ∉ values(wkd)
     @test length(wkd) == 2
@@ -847,6 +881,7 @@ Dict(1 => rand(2,3), 'c' => "asdf") # just make sure this does not trigger a dep
 
     wkd = WeakKeyDict(A=>1)
     @test delete!(wkd, A) == empty(wkd)
+    @test delete!(wkd, A) === wkd
 
     # issue #26939
     d26939 = WeakKeyDict()
@@ -866,6 +901,20 @@ Dict(1 => rand(2,3), 'c' => "asdf") # just make sure this does not trigger a dep
     @test wkd[[1.0]] == 2
     @test haskey(wkd, [1.0])
     @test pop!(wkd, [1.0]) == 2
+    @test get(()->3, wkd, [2.0]) == 3
+
+    # map! on values of WKD
+    wkd = WeakKeyDict(A=>2, B=>3)
+    map!(v->v-1, values(wkd))
+    @test wkd == WeakKeyDict(A=>1, B=>2)
+
+    # get!
+    wkd = WeakKeyDict(A=>2)
+    get!(wkd, B, 3)
+    @test wkd == WeakKeyDict(A=>2, B=>3)
+    get!(()->4, wkd, C)
+    @test wkd == WeakKeyDict(A=>2, B=>3, C=>4)
+    @test_throws ArgumentError get!(()->5, wkd, [1.0])
 end
 
 @testset "issue #19995, hash of dicts" begin
@@ -907,14 +956,22 @@ let
     end
 end
 
+struct NonFunctionCallable end
+(::NonFunctionCallable)(args...) = +(args...)
+
 @testset "Dict merge" begin
     d1 = Dict("A" => 1, "B" => 2)
     d2 = Dict("B" => 3.0, "C" => 4.0)
     @test @inferred merge(d1, d2) == Dict("A" => 1, "B" => 3, "C" => 4)
     # merge with combiner function
+    @test @inferred mergewith(+, d1, d2) == Dict("A" => 1, "B" => 5, "C" => 4)
+    @test @inferred mergewith(*, d1, d2) == Dict("A" => 1, "B" => 6, "C" => 4)
+    @test @inferred mergewith(-, d1, d2) == Dict("A" => 1, "B" => -1, "C" => 4)
+    @test @inferred mergewith(NonFunctionCallable(), d1, d2) == Dict("A" => 1, "B" => 5, "C" => 4)
+    @test foldl(mergewith(+), [d1, d2]; init=Dict{Union{},Union{}}()) ==
+        Dict("A" => 1, "B" => 5, "C" => 4)
+    # backward compatibility
     @test @inferred merge(+, d1, d2) == Dict("A" => 1, "B" => 5, "C" => 4)
-    @test @inferred merge(*, d1, d2) == Dict("A" => 1, "B" => 6, "C" => 4)
-    @test @inferred merge(-, d1, d2) == Dict("A" => 1, "B" => -1, "C" => 4)
 end
 
 @testset "Dict merge!" begin
@@ -923,12 +980,36 @@ end
     @inferred merge!(d1, d2)
     @test d1 == Dict("A" => 1, "B" => 3, "C" => 4)
     # merge! with combiner function
-    @inferred merge!(+, d1, d2)
+    @inferred mergewith!(+, d1, d2)
     @test d1 == Dict("A" => 1, "B" => 6, "C" => 8)
-    @inferred merge!(*, d1, d2)
+    @inferred mergewith!(*, d1, d2)
     @test d1 == Dict("A" => 1, "B" => 18, "C" => 32)
-    @inferred merge!(-, d1, d2)
+    @inferred mergewith!(-, d1, d2)
     @test d1 == Dict("A" => 1, "B" => 15, "C" => 28)
+    @inferred mergewith!(NonFunctionCallable(), d1, d2)
+    @test d1 == Dict("A" => 1, "B" => 18, "C" => 32)
+    @test foldl(mergewith!(+), [d1, d2]; init=empty(d1)) ==
+        Dict("A" => 1, "B" => 21, "C" => 36)
+    # backward compatibility
+    merge!(+, d1, d2)
+    @test d1 == Dict("A" => 1, "B" => 21, "C" => 36)
+end
+
+@testset "Dict reduce merge" begin
+    function check_merge(i::Vector{<:Dict}, o)
+        r1 = reduce(merge, i)
+        r2 = merge(i...)
+        t = typeof(o)
+        @test r1 == o
+        @test r2 == o
+        @test typeof(r1) == t
+        @test typeof(r2) == t
+    end
+    check_merge([Dict(1=>2), Dict(1.0=>2.0)], Dict(1.0=>2.0))
+    check_merge([Dict(1=>2), Dict(2=>Complex(1.0, 1.0))],
+      Dict(2=>Complex(1.0, 1.0), 1=>Complex(2.0, 0.0)))
+    check_merge([Dict(1=>2), Dict(3=>4)], Dict(3=>4, 1=>2))
+    check_merge([Dict(3=>4), Dict(:a=>5)], Dict(:a => 5, 3 => 4))
 end
 
 @testset "misc error/io" begin

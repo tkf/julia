@@ -3,6 +3,8 @@
 // This LLVM pass verifies invariants required for correct GC root placement.
 // See the devdocs for a description of these invariants.
 
+#include "llvm-version.h"
+
 #include <llvm-c/Core.h>
 #include <llvm-c/Types.h>
 
@@ -24,7 +26,6 @@
 #include <llvm/Pass.h>
 #include <llvm/Support/Debug.h>
 
-#include "llvm-version.h"
 #include "codegen_shared.h"
 #include "julia.h"
 
@@ -85,12 +86,10 @@ void GCInvariantVerifier::visitStoreInst(StoreInst &SI) {
     if (VTy->isPointerTy()) {
         /* We currently don't obey this for arguments. That's ok - they're
            externally rooted. */
-        if (!isa<Argument>(SI.getValueOperand())) {
-            unsigned AS = cast<PointerType>(VTy)->getAddressSpace();
-            Check(AS != AddressSpace::CalleeRooted &&
-                  AS != AddressSpace::Derived,
-                  "Illegal store of decayed value", &SI);
-        }
+        unsigned AS = cast<PointerType>(VTy)->getAddressSpace();
+        Check(AS != AddressSpace::CalleeRooted &&
+              AS != AddressSpace::Derived,
+              "Illegal store of decayed value", &SI);
     }
     VTy = SI.getPointerOperand()->getType();
     if (VTy->isPointerTy()) {
@@ -155,7 +154,7 @@ void GCInvariantVerifier::visitGetElementPtrInst(GetElementPtrInst &GEP) {
 
 void GCInvariantVerifier::visitCallInst(CallInst &CI) {
     CallingConv::ID CC = CI.getCallingConv();
-    if (CC == JLCALL_CC || CC == JLCALL_F_CC) {
+    if (CC == JLCALL_F_CC || CC == JLCALL_F2_CC) {
         for (Value *Arg : CI.arg_operands()) {
             Type *Ty = Arg->getType();
             Check(Ty->isPointerTy() && cast<PointerType>(Ty)->getAddressSpace() == AddressSpace::Tracked,

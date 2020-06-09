@@ -663,6 +663,25 @@ end
     @test_throws DimensionMismatch (1, 2) .+ (1, 2, 3)
 end
 
+@testset "broadcasted assignment from tuples and tuple styles (#33020)" begin
+    a = zeros(3)
+    @test_throws DimensionMismatch a .= (1,2)
+    @test_throws DimensionMismatch a .= sqrt.((1,2))
+    a .= (1,)
+    @test all(==(1), a)
+    a .= sqrt.((2,))
+    @test all(==(√2), a)
+    a = zeros(3, 2)
+    @test_throws DimensionMismatch a .= (1,2)
+    @test_throws DimensionMismatch a .= sqrt.((1,2))
+    a .= (1,)
+    @test all(==(1), a)
+    a .= sqrt.((2,))
+    @test all(==(√2), a)
+    a .= (1,2,3)
+    @test a == [1 1; 2 2; 3 3]
+end
+
 @testset "scalar .=" begin
     A = [[1,2,3],4:5,6]
     A[1] .= 0
@@ -682,6 +701,15 @@ end
 let n = 1
     @test ceil.(Int, n ./ (1,)) == (1,)
     @test ceil.(Int, 1 ./ (1,)) == (1,)
+end
+
+# Issue #29266
+@testset "deprecated scalar-fill .=" begin
+    a = fill(1, 10)
+    @test_throws ArgumentError a[1:5] = 0
+
+    x = randn(10)
+    @test_throws ArgumentError x[x .> 0.0] = 0.0
 end
 
 
@@ -793,6 +821,7 @@ end
 # Broadcasted iterable/indexable APIs
 let
     bc = Broadcast.instantiate(Broadcast.broadcasted(+, zeros(5), 5))
+    @test IndexStyle(bc) == IndexLinear()
     @test eachindex(bc) === Base.OneTo(5)
     @test length(bc) === 5
     @test ndims(bc) === 1
@@ -803,6 +832,7 @@ let
     @test ndims(copy(bc)) == ndims([v for v in bc]) == ndims(collect(bc)) == ndims(bc)
 
     bc = Broadcast.instantiate(Broadcast.broadcasted(+, zeros(5), 5*ones(1, 4)))
+    @test IndexStyle(bc) == IndexCartesian()
     @test eachindex(bc) === CartesianIndices((Base.OneTo(5), Base.OneTo(4)))
     @test length(bc) === 20
     @test ndims(bc) === 2
@@ -817,4 +847,85 @@ end
 let a = rand(5), b = rand(5), c = copy(a)
     view(identity(a), 1:3) .+= view(b, 1:3)
     @test a == [(c+b)[1:3]; c[4:5]]
+
+    x = [1]
+    x[[1,1]] .+= 1
+    @test x == [2]
 end
+
+@testset "broadcasted mapreduce" begin
+    xs = 1:10
+    ys = 1:2:20
+    bc = Broadcast.instantiate(Broadcast.broadcasted(*, xs, ys))
+    @test IndexStyle(bc) == IndexLinear()
+    @test sum(bc) == mapreduce(Base.splat(*), +, zip(xs, ys))
+
+    xs2 = reshape(xs, 1, :)
+    ys2 = reshape(ys, 1, :)
+    bc = Broadcast.instantiate(Broadcast.broadcasted(*, xs2, ys2))
+    @test IndexStyle(bc) == IndexCartesian()
+    @test sum(bc) == mapreduce(Base.splat(*), +, zip(xs, ys))
+
+    xs = 1:5:3*5
+    ys = 1:4:3*4
+    bc = Broadcast.instantiate(
+        Broadcast.broadcasted(iseven, Broadcast.broadcasted(-, xs, ys)))
+    @test count(bc) == count(iseven, map(-, xs, ys))
+
+    xs = reshape(1:6, (2, 3))
+    ys = 1:2
+    bc = Broadcast.instantiate(Broadcast.broadcasted(*, xs, ys))
+    @test reduce(+, bc; dims=1, init=0) == [5 11 17]
+
+    # Let's test that `Broadcasted` actually hits the efficient
+    # `mapreduce` method as intended.  We are going to invoke `reduce`
+    # with this *NON-ASSOCIATIVE* binary operator to see what
+    # associativity is chosen by the implementation:
+    paren = (x, y) -> "($x,$y)"
+    # Next, we construct data `xs` such that `length(xs)` is greater
+    # than short array cutoff of `_mapreduce`:
+    alphabets = 'a':'z'
+    blksize = Base.pairwise_blocksize(identity, paren) ÷ length(alphabets)
+    xs = repeat(alphabets, 2 * blksize)
+    @test length(xs) > blksize
+    # So far we constructed the data `xs` and reducing function
+    # `paren` such that `reduce` and `foldl` results are different.
+    # That is to say, this `reduce` does not hit the fall-back `foldl`
+    # branch:
+    @test foldl(paren, xs) != reduce(paren, xs)
+
+    # Now let's try it with `Broadcasted`:
+    bcraw = Broadcast.broadcasted(identity, xs)
+    bc = Broadcast.instantiate(bcraw)
+    # If `Broadcasted` has `IndexLinear` style, it should hit the
+    # `reduce` branch:
+    @test IndexStyle(bc) == IndexLinear()
+    @test reduce(paren, bc) == reduce(paren, xs)
+    # If `Broadcasted` does not have `IndexLinear` style, it should
+    # hit the `foldl` branch:
+    @test IndexStyle(bcraw) == IndexCartesian()
+    @test reduce(paren, bcraw) == foldl(paren, xs)
+end
+
+# treat Pair as scalar:
+@test replace.(split("The quick brown fox jumps over the lazy dog"), r"[aeiou]"i => "_") ==
+      ["Th_", "q__ck", "br_wn", "f_x", "j_mps", "_v_r", "th_", "l_zy", "d_g"]
+
+# 28680
+@test 1 .+ 1 .+  (1, 2) == (3, 4)
+
+# PR #35260 no allocations in simple broadcasts
+u = rand(100)
+k1 = similar(u)
+k2 = similar(u)
+k3 = similar(u)
+k4 = similar(u)
+f(a,b,c,d,e) = @. a = a + 1*(b+c+d+e)
+@allocated f(u,k1,k2,k3,k4)
+@test (@allocated f(u,k1,k2,k3,k4)) == 0
+
+ret =  @macroexpand @.([Int, Number] <: Real)
+@test ret == :([Int, Number] .<: Real)
+
+ret =  @macroexpand @.([Int, Number] >: Real)
+@test ret == :([Int, Number] .>: Real)

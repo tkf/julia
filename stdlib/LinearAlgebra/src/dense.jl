@@ -247,9 +247,14 @@ diag(A::AbstractMatrix, k::Integer=0) = A[diagind(A,k)]
 
 """
     diagm(kv::Pair{<:Integer,<:AbstractVector}...)
+    diagm(m::Integer, n::Integer, kv::Pair{<:Integer,<:AbstractVector}...)
 
-Construct a square matrix from `Pair`s of diagonals and vectors.
+Construct a matrix from `Pair`s of diagonals and vectors.
 Vector `kv.second` will be placed on the `kv.first` diagonal.
+By default the matrix is square and its size is inferred
+from `kv`, but a non-square size `m`×`n` (padded with zeros as needed)
+can be specified by passing `m,n` as the first arguments.
+
 `diagm` constructs a full matrix; if you want storage-efficient
 versions with fast arithmetic, see [`Diagonal`](@ref), [`Bidiagonal`](@ref)
 [`Tridiagonal`](@ref) and [`SymTridiagonal`](@ref).
@@ -271,8 +276,10 @@ julia> diagm(1 => [1,2,3], -1 => [4,5])
  0  0  0  0
 ```
 """
-function diagm(kv::Pair{<:Integer,<:AbstractVector}...)
-    A = diagm_container(kv...)
+diagm(kv::Pair{<:Integer,<:AbstractVector}...) = _diagm(nothing, kv...)
+diagm(m::Integer, n::Integer, kv::Pair{<:Integer,<:AbstractVector}...) = _diagm((Int(m),Int(n)), kv...)
+function _diagm(size, kv::Pair{<:Integer,<:AbstractVector}...)
+    A = diagm_container(size, kv...)
     for p in kv
         inds = diagind(A, p.first)
         for (i, val) in enumerate(p.second)
@@ -281,20 +288,32 @@ function diagm(kv::Pair{<:Integer,<:AbstractVector}...)
     end
     return A
 end
-function diagm_container(kv::Pair{<:Integer,<:AbstractVector}...)
+function diagm_size(size::Nothing, kv::Pair{<:Integer,<:AbstractVector}...)
+    mnmax = mapreduce(x -> length(x.second) + abs(Int(x.first)), max, kv; init=0)
+    return mnmax, mnmax
+end
+function diagm_size(size::Tuple{Int,Int}, kv::Pair{<:Integer,<:AbstractVector}...)
+    mmax = mapreduce(x -> length(x.second) - min(0,Int(x.first)), max, kv; init=0)
+    nmax = mapreduce(x -> length(x.second) + max(0,Int(x.first)), max, kv; init=0)
+    m, n = size
+    (m ≥ mmax && n ≥ nmax) || throw(DimensionMismatch("invalid size=$size"))
+    return m, n
+end
+function diagm_container(size, kv::Pair{<:Integer,<:AbstractVector}...)
     T = promote_type(map(x -> eltype(x.second), kv)...)
-    n = mapreduce(x -> length(x.second) + abs(x.first), max, kv)
-    return zeros(T, n, n)
+    return zeros(T, diagm_size(size, kv...)...)
 end
-function diagm_container(kv::Pair{<:Integer,<:BitVector}...)
-    n = mapreduce(x -> length(x.second) + abs(x.first), max, kv)
-    return falses(n, n)
-end
+diagm_container(size, kv::Pair{<:Integer,<:BitVector}...) =
+    falses(diagm_size(size, kv...)...)
 
 """
     diagm(v::AbstractVector)
+    diagm(m::Integer, n::Integer, v::AbstractVector)
 
-Construct a square matrix with elements of the vector as diagonal elements.
+Construct a matrix with elements of the vector as diagonal elements.
+By default, the matrix is square and its size is given by
+`length(v)`, but a non-square size `m`×`n` can be specified
+by passing `m,n` as the first arguments.
 
 # Examples
 ```jldoctest
@@ -306,6 +325,7 @@ julia> diagm([1,2,3])
 ```
 """
 diagm(v::AbstractVector) = diagm(0 => v)
+diagm(m::Integer, n::Integer, v::AbstractVector) = diagm(m, n, 0 => v)
 
 function tr(A::Matrix{T}) where T
     n = checksquare(A)
@@ -317,9 +337,39 @@ function tr(A::Matrix{T}) where T
 end
 
 """
+    kron!(C, A, B)
+
+`kron!` is the in-place version of [`kron`](@ref). Computes `kron(A, B)` and stores the result in `C`
+overwriting the existing value of `C`.
+
+!!! tip
+    Bounds checking can be disabled by [`@inbounds`](@ref), but you need to take care of the shape
+    of `C`, `A`, `B` yourself.
+"""
+@inline function kron!(C::AbstractMatrix, A::AbstractMatrix, B::AbstractMatrix)
+    require_one_based_indexing(A, B)
+    @boundscheck (size(C) == (size(A,1)*size(B,1), size(A,2)*size(B,2))) || throw(DimensionMismatch())
+    m = 0
+    @inbounds for j = 1:size(A,2), l = 1:size(B,2), i = 1:size(A,1)
+        Aij = A[i,j]
+        for k = 1:size(B,1)
+            C[m += 1] = Aij*B[k,l]
+        end
+    end
+    return C
+end
+
+"""
     kron(A, B)
 
 Kronecker tensor product of two vectors or two matrices.
+
+For real vectors `v` and `w`, the Kronecker product is related to the outer product by
+`kron(v,w) == vec(w * transpose(v))` or
+`w * transpose(v) == reshape(kron(v,w), (length(w), length(v)))`.
+Note how the ordering of `v` and `w` differs on the left and right
+of these expressions (due to column-major storage).
+For complex vectors, the outer product `w * v'` also differs by conjugation of `v`.
 
 # Examples
 ```jldoctest
@@ -339,26 +389,48 @@ julia> kron(A, B)
  1+0im  0-1im  2+0im  0-2im
  0+3im  3+0im  0+4im  4+0im
  3+0im  0-3im  4+0im  0-4im
+
+julia> v = [1, 2]; w = [3, 4, 5];
+
+julia> w*transpose(v)
+3×2 Array{Int64,2}:
+ 3   6
+ 4   8
+ 5  10
+
+julia> reshape(kron(v,w), (length(w), length(v)))
+3×2 Array{Int64,2}:
+ 3   6
+ 4   8
+ 5  10
 ```
 """
 function kron(a::AbstractMatrix{T}, b::AbstractMatrix{S}) where {T,S}
-    require_one_based_indexing(a, b)
     R = Matrix{promote_op(*,T,S)}(undef, size(a,1)*size(b,1), size(a,2)*size(b,2))
-    m = 0
-    @inbounds for j = 1:size(a,2), l = 1:size(b,2), i = 1:size(a,1)
-        aij = a[i,j]
-        for k = 1:size(b,1)
-            R[m += 1] = aij*b[k,l]
-        end
-    end
-    R
+    return @inbounds kron!(R, a, b)
 end
+
+kron!(c::AbstractVecOrMat, a::AbstractVecOrMat, b::Number) = mul!(c, a, b)
+
+Base.@propagate_inbounds function kron!(c::AbstractVector, a::AbstractVector, b::AbstractVector)
+    C = reshape(c, length(a)*length(b), 1)
+    A = reshape(a ,length(a), 1)
+    B = reshape(b, length(b), 1)
+    kron!(C, A, B)
+    return c
+end
+
+Base.@propagate_inbounds kron!(C::AbstractMatrix, a::AbstractMatrix, b::AbstractVector) = kron!(C, a, reshape(b, length(b), 1))
+Base.@propagate_inbounds kron!(C::AbstractMatrix, a::AbstractVector, b::AbstractMatrix) = kron!(C, reshape(a, length(a), 1), b)
 
 kron(a::Number, b::Union{Number, AbstractVecOrMat}) = a * b
 kron(a::AbstractVecOrMat, b::Number) = a * b
 kron(a::AbstractVector, b::AbstractVector) = vec(kron(reshape(a ,length(a), 1), reshape(b, length(b), 1)))
 kron(a::AbstractMatrix, b::AbstractVector) = kron(a, reshape(b, length(b), 1))
 kron(a::AbstractVector, b::AbstractMatrix) = kron(reshape(a, length(a), 1), b)
+
+kron(a::AdjointAbsVec, b::AdjointAbsVec) = adjoint(kron(adjoint(a), adjoint(b)))
+kron(a::AdjOrTransAbsVec, b::AdjOrTransAbsVec) = transpose(kron(transpose(a), transpose(b)))
 
 # Matrix power
 (^)(A::AbstractMatrix, p::Integer) = p < 0 ? power_by_squaring(inv(A), -p) : power_by_squaring(A, p)
@@ -666,8 +738,15 @@ If `A` has no negative real eigenvalues, compute the principal matrix square roo
 that is the unique matrix ``X`` with eigenvalues having positive real part such that
 ``X^2 = A``. Otherwise, a nonprincipal square root is returned.
 
-If `A` is symmetric or Hermitian, its eigendecomposition ([`eigen`](@ref)) is
-used to compute the square root. Otherwise, the square root is determined by means of the
+If `A` is real-symmetric or Hermitian, its eigendecomposition ([`eigen`](@ref)) is
+used to compute the square root.   For such matrices, eigenvalues λ that
+appear to be slightly negative due to roundoff errors are treated as if they were zero
+More precisely, matrices with all eigenvalues `≥ -rtol*(max |λ|)` are treated as semidefinite
+(yielding a Hermitian square root), with negative eigenvalues taken to be zero.
+`rtol` is a keyword argument to `sqrt` (in the Hermitian/real-symmetric case only) that
+defaults to machine precision scaled by `size(A,1)`.
+
+Otherwise, the square root is determined by means of the
 Björck-Hammarling method [^BH83], which computes the complex Schur form ([`schur`](@ref))
 and then the complex square root of the triangular factor.
 
@@ -1272,7 +1351,7 @@ julia> M * N
  4.44089e-16   1.0
 ```
 
-[^issue8859]: Issue 8859, "Fix least squares", https://github.com/JuliaLang/julia/pull/8859
+[^issue8859]: Issue 8859, "Fix least squares", [https://github.com/JuliaLang/julia/pull/8859](https://github.com/JuliaLang/julia/pull/8859)
 
 [^B96]: Åke Björck, "Numerical Methods for Least Squares Problems",  SIAM Press, Philadelphia, 1996, "Other Titles in Applied Mathematics", Vol. 51. [doi:10.1137/1.9781611971484](http://epubs.siam.org/doi/book/10.1137/1.9781611971484)
 
@@ -1319,12 +1398,12 @@ end
 ## Basis for null space
 
 """
-    nullspace(M; atol::Real=0, rtol::Rea=atol>0 ? 0 : n*ϵ)
+    nullspace(M; atol::Real=0, rtol::Real=atol>0 ? 0 : n*ϵ)
     nullspace(M, rtol::Real) = nullspace(M; rtol=rtol) # to be deprecated in Julia 2.0
 
 Computes a basis for the nullspace of `M` by including the singular
-vectors of A whose singular have magnitude are greater than `max(atol, rtol*σ₁)`,
-where `σ₁` is `M`'s largest singularvalue.
+vectors of `M` whose singular values have magnitudes greater than `max(atol, rtol*σ₁)`,
+where `σ₁` is `M`'s largest singular value.
 
 By default, the relative tolerance `rtol` is `n*ϵ`, where `n`
 is the size of the smallest dimension of `M`, and `ϵ` is the [`eps`](@ref) of
@@ -1378,15 +1457,22 @@ function cond(A::AbstractMatrix, p::Real=2)
     if p == 2
         v = svdvals(A)
         maxv = maximum(v)
-        return maxv == 0.0 ? oftype(real(A[1,1]),Inf) : maxv / minimum(v)
+        return iszero(maxv) ? oftype(real(maxv), Inf) : maxv / minimum(v)
     elseif p == 1 || p == Inf
         checksquare(A)
-        return _cond1Inf(A, p)
+        try
+            Ainv = inv(A)
+            return opnorm(A, p)*opnorm(Ainv, p)
+        catch e
+            if isa(e, LAPACKException) || isa(e, SingularException)
+                return convert(float(real(eltype(A))), Inf)
+            else
+                rethrow()
+            end
+        end
     end
     throw(ArgumentError("p-norm must be 1, 2 or Inf, got $p"))
 end
-_cond1Inf(A::StridedMatrix{<:BlasFloat}, p::Real) = _cond1Inf(lu(A), p, opnorm(A, p))
-_cond1Inf(A::AbstractMatrix, p::Real)             = opnorm(A, p)*opnorm(inv(A), p)
 
 ## Lyapunov and Sylvester equation
 

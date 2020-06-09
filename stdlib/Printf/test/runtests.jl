@@ -39,11 +39,10 @@ for (fmt, val) in (("%i", "42"),
                    ("%20a","            0x2.ap+4"),
                    ("%-20a","0x2.ap+4            "),
                    ("%f", "42.000000"),
-                   ("%g", "42")),
+                   ("%g", "42"),
+                   ("%e", "4.200000e+01")),
      num in (UInt16(42), UInt32(42), UInt64(42), UInt128(42),
               Int16(42), Int32(42), Int64(42), Int128(42), big"42")
-            #big"42" causes stack overflow on %a ; gh #14409
-    num isa BigInt && fmt in ["%a", "%#o", "%g"] && continue
     @test @eval(@sprintf($fmt, $num) == $val)
 end
 
@@ -51,9 +50,13 @@ end
 if Sys.WORD_SIZE == 64
     @test (@sprintf "%20p" 0) == "  0x0000000000000000"
     @test (@sprintf "%-20p" 0) == "0x0000000000000000  "
+    @test (@sprintf "%20p" C_NULL) == "  0x0000000000000000"
+    @test (@sprintf "%-20p" C_NULL) == "0x0000000000000000  "
 elseif Sys.WORD_SIZE == 32
     @test (@sprintf "%20p" 0) == "          0x00000000"
     @test (@sprintf "%-20p" 0) == "0x00000000          "
+    @test (@sprintf "%20p" C_NULL) == "          0x00000000"
+    @test (@sprintf "%-20p" C_NULL) == "0x00000000          "
 else
     @test false
 end
@@ -271,6 +274,7 @@ end
 @test (@sprintf "%s %s %s %d %d %d %f %f %f" Any[10^x+y for x=1:3,y=1:3 ]...) == "11 101 1001 12 102 1002 13.000000 103.000000 1003.000000"
 
 # @printf
+@test_me ArgumentError("@printf: called with no arguments") @macroexpand(@printf)
 @test_me ArgumentError("@printf: first or second argument must be a format string") @macroexpand(@printf 1)
 
 # Check bug with trailing nul printing BigFloat
