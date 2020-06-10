@@ -993,7 +993,6 @@ export
 
     @assert,
     @__dot__,
-    @:,
     @enum,
     @label,
     @goto,
