@@ -9,6 +9,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
+      - uses: actions/cache@v2
+        env:
+          cache-name: cache-srccache
+        with:
+          path: deps/srccache
+          key: ${{ env.cache-name }}
       - run: make
       - run: ./julia -e 'using Pkg; pkg"dev PyCall"'
       - run: cp test.sh /tmp/test.sh
