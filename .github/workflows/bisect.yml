@@ -18,6 +18,7 @@ jobs:
           path: deps/srccache
           key: ${{ env.cache-name }}
       - run: make -j2
+      - run: ./julia -e 'using Pkg; pkg"add PackageCompiler#cb994c72e2087c57ffa4727ef93589e1b98d8a32"'
       - run: ./julia -e 'using Pkg; pkg"dev PyCall"'
       - run: cp test.sh /tmp/test.sh
 
