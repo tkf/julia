@@ -1,7 +1,7 @@
 #!/bin/bash
 JULIA="$PWD/usr/bin/julia"
 set -ex
-make -C deps uninstall
+make clean
 make
 cd ~/.julia/dev/PyCall
 "$JULIA" --startup-file=no aot/compile.jl
