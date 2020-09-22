@@ -10,15 +10,18 @@ jobs:
     strategy:
       matrix:
         revision:
-          - 8659cfeda7afa5cf665e282e927812f0a9d51d03
-          - 03ec50d7dd997be827d1b82c90b19f4be780c792
-          - b18647edda608d473b049ef2c7a40a9d481f0e2d
-          - c718376d3adeadfba101cb2255dabfa3dffa45b2
-          - 26e38cc6f96ff3d32cc67e1426d8b69213ce497d
-          - 5f55b977e439ab7b0d09dd826732ff5ea3f1098f
-          - 5a86131b14d2a8967141c7eadd3095f1b84a64e1
-          - 10e2455860888f1a2a0b34adc1c0f352181343b1
-          - 9ffc7036ff420ca6fe3be61c4540cca5b235deb4
+          - 9738c14bdfab5aa1c0c51f8928157068f214cb6b
+          - fafc0a4ee38d401aab2ac2027cc2b75c1d296faa
+          - 7bab22eda6f4a274a70001f5b292e71add572558
+          - e37876793f77b516c30000b66b373e71b1e462e5
+          - 4a6d7bfcad3fdcb9ba7773f797502db80e457f56
+          - 54ed72a45c9b8b6bc6fa001755fa4d15ccd61c5f
+          - 83d0beca4118cec532a4d7c753ec360f160e3822
+          - 54946b01bd04b24f72c862190e8d2eab7845ec68
+          - bc870caf331a8de9352afe525e0c6977bf96c7f8
+          - c4226dddbc73881ba51710e1166e03c2ea70fa63
+          - 5d79f76b320db10ef34026280db2afe10fc9bf4b
+          - ace08d84d69d4bd807bb4bc26a18c8a3494afe6b
       fail-fast: false
     steps:
       - uses: actions/checkout@v2
