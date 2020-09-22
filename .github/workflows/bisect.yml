@@ -22,7 +22,7 @@ jobs:
       - run: cp test.sh /tmp/test.sh
 
       - run: git checkout 8659cfeda7afa5cf665e282e927812f0a9d51d03
-      - run: test ! /tmp/test.sh
+      - run: "! /tmp/test.sh"
 
       - run: git checkout 0d7dc9621e13229a20630ee761edafe5ee999b62
       - run: /tmp/test.sh
