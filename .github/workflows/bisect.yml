@@ -1,0 +1,12 @@
+name: 'Bisection JuliaLang/PackageCompiler.jl#445'
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  bisect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - run: make
