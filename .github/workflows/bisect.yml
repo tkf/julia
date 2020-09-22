@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  bisect:
+  search:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -19,6 +19,7 @@ jobs:
           - 5a86131b14d2a8967141c7eadd3095f1b84a64e1
           - 10e2455860888f1a2a0b34adc1c0f352181343b1
           - 9ffc7036ff420ca6fe3be61c4540cca5b235deb4
+      fail-fast: false
     steps:
       - uses: actions/checkout@v2
         with:
