@@ -18,6 +18,6 @@ jobs:
       - run: cp -r Repro /tmp/
 
       - run: git bisect start
-      - run: git bisect bad 2479691a5a91051d0b71552ecbcf6724a45409a7
-      - run: git bisect good 4e07a3993a07d77be05bab55272e9f2cae26d723
+      - run: git bisect bad bc870caf331a8de9352afe525e0c6977bf96c7f8
+      - run: git bisect good 4ef8313c94c85b3e01597455cb71a60a579f632b
       - run: git bisect run /tmp/test.sh
