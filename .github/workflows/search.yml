@@ -10,9 +10,12 @@ jobs:
     strategy:
       matrix:
         revision:
-          - a3430e7ec1d6c2cc883b7e5079c1a0e096f2eb66
-          - fa1d1c8ddd61f99d46dee28f9e080a43d3d47034
-          - 9267bbf1fcd783278d820efa7e02e9357f962cc6
+          - 7e8f2c05cd39aec8d4349ec915bf5c68cdf4c072
+          - 2a36f83ce9bdfd17c572472f60b830aedcf181f0
+          - 9ffc7036ff420ca6fe3be61c4540cca5b235deb4
+          - bc870caf331a8de9352afe525e0c6977bf96c7f8
+          - 4ef8313c94c85b3e01597455cb71a60a579f632b
+          - fc25e62338e05f185d0455e929d7178877cb0098
       fail-fast: false
     steps:
       - uses: actions/checkout@v2
