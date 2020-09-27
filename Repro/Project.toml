@@ -1,0 +1,4 @@
+name = "Repro"
+uuid = "ad90cc23-4136-43cb-987d-13d68de9ac78"
+authors = ["Takafumi Arakaki <aka.tkf@gmail.com>"]
+version = "0.1.0"
