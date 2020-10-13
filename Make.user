@@ -1,0 +1,8 @@
+LLVM_VER=svn
+USE_TAPIR=1
+BUILD_LLVM_CLANG=1
+LLVM_GIT_VER="WIP-taskinfo"
+LLVM_GIT_VER_CLANG="WIP-csi-tapir-exceptions"
+LLVM_GIT_VER_COMPILER_RT="WIP-cilksan-bugfixes"
+override CC=gcc-7
+override CXX=g++-7
