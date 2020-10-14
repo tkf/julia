@@ -2,7 +2,11 @@
 include $(SRCDIR)/llvm-ver.make
 
 ifneq ($(USE_BINARYBUILDER_LLVM), 1)
+ifneq ($(USE_TAPIR),1)
 LLVM_GIT_URL ?= https://github.com/llvm/llvm-project.git
+else
+LLVM_GIT_URL ?= https://github.com/OpenCilk/opencilk-project.git
+endif
 
 ifeq ($(BUILD_LLDB), 1)
 BUILD_LLVM_CLANG := 1
@@ -61,16 +65,11 @@ ifeq ($(USE_SYSTEM_LLVM),0)
 ifneq ($(LLVM_VER),svn)
 $(error USE_TAPIR=1 requires LLVM_VER=svn)
 else
-TAPIR_GIT_URL=https://github.com/wsmoses
-LLVM_GIT_URL_LLVM=$(TAPIR_GIT_URL)/Tapir-LLVM.git
-LLVM_GIT_URL_CLANG=$(TAPIR_GIT_URL)/Tapir-Clang.git
-LLVM_GIT_URL_COMPILER_RT=$(TAPIR_GIT_URL)/Tapir-compiler-rt.git
-LLVM_GIT_URL_POLLY=$(TAPIR_GIT_URL)/Tapir-Polly.git
+LLVM_GIT_VER ?= 48265098754b785d1b06cb08d8e22477a003efcd
+# opencilk/beta3: https://github.com/OpenCilk/opencilk-project/commit/48265098754b785d1b06cb08d8e22477a003efcd
 
-# Set the patch level to be correct, Parallel-IR is based on 6.0 right now
-# We still want to pick up LLVM patches we carry.
-LLVM_VER_SHORT=6.0
-LLVM_VER_PATH=0
+LLVM_VER_SHORT=9.0
+# LLVM_VER_PATH=0 # Not used?
 endif
 endif
 endif
