@@ -38,17 +38,25 @@ namespace llvm {
 
 class JuliaTapir : public TapirTarget {
     public:
-        JuliaTapir() {}
+        JuliaTapir(Module &M) : TapirTarget(M) {}
         ~JuliaTapir() {}
+
         Value *lowerGrainsizeCall(CallInst *GrainsizeCall) override final;
         void lowerSync(SyncInst &inst) override final;
 
-        void preProcessFunction(Function &F) override final;
-        void postProcessFunction(Function &F) override final;
+        void preProcessFunction(Function &F, TaskInfo &TI,
+                                bool OutliningTapirLoops) override final;
+        void postProcessFunction(Function &F, bool OutliningTapirLoops) override final;
         void postProcessHelper(Function &F) override final;
 
-        void processOutlinedTask(Function &F) override final;
-        void processSpawner(Function &F) override final;
+        void preProcessOutlinedTask(Function &F, Instruction *DetachPt,
+                                    Instruction *TaskFrameCreate,
+                                    bool IsSpawner) override final;
+        void postProcessOutlinedTask(Function &F, Instruction *DetachPt,
+                                     Instruction *TaskFrameCreate,
+                                     bool IsSpawner) override final;
+        void preProcessRootSpawner(Function &F) override final;
+        void postProcessRootSpawner(Function &F) override final;
         void processSubTaskCall(TaskOutlineInfo &TOI, DominatorTree &DT)
             override final;
 };
@@ -103,7 +111,36 @@ void JuliaTapir::lowerSync(SyncInst &SI) {
     // BranchInst::Create(Succ, CI->getParent());
 }
 
-void JuliaTapir::processSpawner(Function &F) {
+void JuliaTapir::preProcessFunction(Function &F, TaskInfo &TI, bool OutliningTapirLoops) {
+    // nothing
+}
+
+void JuliaTapir::postProcessFunction(Function &F, bool OutliningTapirLoops) {
+    // nothing
+}
+
+void JuliaTapir::postProcessHelper(Function &F) {
+    // nothing
+}
+
+void JuliaTapir::preProcessOutlinedTask(Function &F, Instruction *DetachPt,
+                                        Instruction *TaskFrameCreate,
+                                        bool IsSpawner) {
+    // nothing
+}
+
+void JuliaTapir::postProcessOutlinedTask(Function &F, Instruction *DetachPt,
+                                         Instruction *TaskFrameCreate,
+                                         bool IsSpawner) {
+    // nothing
+}
+
+void JuliaTapir::preProcessRootSpawner(Function &F) {
+    // TODO:
+    // create tasklist
+}
+
+void JuliaTapir::postProcessRootSpawner(Function &F) {
     // TODO:
     // create tasklist
 }
@@ -123,22 +160,5 @@ void JuliaTapir::processSubTaskCall(TaskOutlineInfo &TOI, DominatorTree &DT) {
     // schedule(t)
 
 }
-
-void JuliaTapir::processOutlinedTask(Function &F) {
-    // nothing
-}
-
-void JuliaTapir::preProcessFunction(Function &F) {
-    // nothing
-}
-
-void JuliaTapir::postProcessFunction(Function &F) {
-    // nothing
-}
-
-void JuliaTapir::postProcessHelper(Function &F) {
-    // nothing
-}
-
 
 } // namespace LLVM
