@@ -1,9 +1,11 @@
+# This file is a part of Julia. License is MIT: https://julialang.org/license
+
 module MiniCassette
     # A minimal demonstration of the cassette mechanism. Doesn't support all the
     # fancy features, but sufficient to exercise this code path in the compiler.
 
     using Core.Compiler: method_instances, retrieve_code_info, CodeInfo,
-        MethodInstance, SSAValue, GotoNode, Slot, SlotNumber, quoted,
+        MethodInstance, SSAValue, GotoNode, GotoIfNot, ReturnNode, Slot, SlotNumber, quoted,
         signature_type
     using Base: _methods_by_ftype
     using Base.Meta: isexpr
@@ -18,10 +20,12 @@ module MiniCassette
         transform(expr) = transform_expr(expr, map_slot_number, map_ssa_value, sparams)
         if isexpr(expr, :call)
             return Expr(:call, overdub, SlotNumber(2), map(transform, expr.args)...)
-        elseif isexpr(expr, :gotoifnot)
-            return Expr(:gotoifnot, transform(expr.args[1]), map_ssa_value(SSAValue(expr.args[2])).id)
+        elseif isa(expr, GotoIfNot)
+            return GotoIfNot(transform(expr.cond), map_ssa_value(SSAValue(expr.dest)).id)
         elseif isexpr(expr, :static_parameter)
             return quoted(sparams[expr.args[1]])
+        elseif isa(expr, ReturnNode)
+            return ReturnNode(transform(expr.val))
         elseif isa(expr, Expr)
             return Expr(expr.head, map(transform, expr.args)...)
         elseif isa(expr, GotoNode)
@@ -62,15 +66,16 @@ module MiniCassette
     end
 
     function overdub_generator(self, c, f, args)
-        if f <: Core.Builtin || !isdefined(f, :instance)
+        if !isdefined(f, :instance)
             return :(return f(args...))
         end
 
         tt = Tuple{f, args...}
         mthds = _methods_by_ftype(tt, -1, typemax(UInt))
         @assert length(mthds) == 1
-        mtypes, msp, m = mthds[1]
-        mi = ccall(:jl_specializations_get_linfo, Ref{MethodInstance}, (Any, Any, Any), m, mtypes, msp)
+        match = mthds[1]
+        mi = ccall(:jl_specializations_get_linfo, Ref{MethodInstance},
+            (Any, Any, Any), match.method, match.spec_types, match.sparams)
         # Unsupported in this mini-cassette
         @assert !mi.def.isva
         code_info = retrieve_code_info(mi)
@@ -79,8 +84,12 @@ module MiniCassette
         if isdefined(code_info, :edges)
             code_info.edges = MethodInstance[mi]
         end
-        transform!(code_info, length(args), msp)
+        transform!(code_info, length(args), match.sparams)
         code_info
+    end
+
+    @inline function overdub(c::Ctx, f::Union{Core.Builtin, Core.IntrinsicFunction}, args...)
+        f(args...)
     end
 
     @eval function overdub(c::Ctx, f, args...)
@@ -112,5 +121,20 @@ f() = 2
 # Test that pure propagates for Cassette
 Base.@pure isbitstype(T) = T.isbitstype
 f31012(T) = Val(isbitstype(T))
-@test @inferred overdub(Ctx(), f31012, Int64) == Val(true)
+@test @inferred(overdub(Ctx(), f31012, Int64)) == Val(true)
 
+@generated bar(::Val{align}) where {align} = :(42)
+foo(i) = i+bar(Val(1))
+
+@test @inferred(overdub(Ctx(), foo, 1)) == 43
+
+# Check that misbehaving pure functions propagate their error
+Base.@pure func1() = 42
+Base.@pure func2() = (this_is_an_exception; func1())
+
+let method = which(func2, ())
+    mi = Core.Compiler.specialize_method(method, Tuple{typeof(func2)}, Core.svec())
+    mi.inInference = true
+end
+func3() = func2()
+@test_throws UndefVarError func3()

@@ -48,7 +48,7 @@ A not-a-number value of type [`Float64`](@ref).
 NaN, NaN64
 
 ## conversions to floating-point ##
-Float16(x::Integer) = convert(Float16, convert(Float32, x))
+Float16(x::Integer) = convert(Float16, convert(Float32, x)::Float32)
 for t in (Int8, Int16, Int32, Int64, Int128, UInt8, UInt16, UInt32, UInt64, UInt128)
     @eval promote_rule(::Type{Float16}, ::Type{$t}) = Float16
 end
@@ -196,7 +196,7 @@ function Float16(val::Float32)
     # NOTE: we maybe should ignore NaNs here, but the payload is
     # getting truncated anyway so "rounding" it might not matter
     nextbit = (f >> (sh-1)) & 1
-    if nextbit != 0
+    if nextbit != 0 && (h & 0x7C00) != 0x7C00
         # Round halfway to even or check lower bits
         if h&1 == 1 || (f & ((1<<(sh-1))-1)) != 0
             h += UInt16(1)
@@ -285,7 +285,7 @@ Equivalent to `typeof(float(zero(T)))`.
 # Examples
 ```jldoctest
 julia> float(Complex{Int})
-Complex{Float64}
+ComplexF64 (alias for Complex{Float64})
 
 julia> float(Int)
 Float64
@@ -530,26 +530,13 @@ abs(x::Float64) = abs_float(x)
 """
     isnan(f) -> Bool
 
-Test whether a floating point number is not a number (NaN).
+Test whether a number value is a NaN, an indeterminate value which is neither an infinity
+nor a finite number ("not a number").
 """
-isnan(x::AbstractFloat) = x != x
+isnan(x::AbstractFloat) = (x != x)::Bool
 isnan(x::Float16) = reinterpret(UInt16,x)&0x7fff > 0x7c00
 isnan(x::Real) = false
 
-"""
-    isfinite(f) -> Bool
-
-Test whether a number is finite.
-
-# Examples
-```jldoctest
-julia> isfinite(5)
-true
-
-julia> isfinite(NaN32)
-false
-```
-"""
 isfinite(x::AbstractFloat) = x - x == 0
 isfinite(x::Float16) = reinterpret(UInt16,x)&0x7c00 != 0x7c00
 isfinite(x::Real) = decompose(x)[3] != 0
@@ -578,7 +565,7 @@ hash(x::Float32, h::UInt) = hash(Float64(x), h)
     precision(num::AbstractFloat)
 
 Get the precision of a floating point number, as defined by the effective number of bits in
-the mantissa.
+the significand.
 """
 function precision end
 
@@ -724,6 +711,8 @@ function issubnormal(x::T) where {T<:IEEEFloat}
     (y & exponent_mask(T) == 0) & (y & significand_mask(T) != 0)
 end
 
+ispow2(x::AbstractFloat) = !iszero(x) && frexp(x)[1] == 0.5
+
 @eval begin
     typemin(::Type{Float16}) = $(bitcast(Float16, 0xfc00))
     typemax(::Type{Float16}) = $(Inf16)
@@ -749,17 +738,29 @@ end
 end
 
 """
-    floatmin(T)
+    floatmin(T = Float64)
 
-The smallest in absolute value non-subnormal value representable by the given
-floating-point DataType `T`.
+Return the smallest positive normal number representable by the floating-point
+type `T`.
+
+# Examples
+```jldoctest
+julia> floatmin(Float16)
+Float16(6.104e-5)
+
+julia> floatmin(Float32)
+1.1754944f-38
+
+julia> floatmin()
+2.2250738585072014e-308
+```
 """
 floatmin(x::T) where {T<:AbstractFloat} = floatmin(T)
 
 """
-    floatmax(T)
+    floatmax(T = Float64)
 
-The highest finite value representable by the given floating-point DataType `T`.
+Return the largest finite number representable by the floating-point type `T`.
 
 # Examples
 ```jldoctest
@@ -768,6 +769,9 @@ Float16(6.55e4)
 
 julia> floatmax(Float32)
 3.4028235f38
+
+julia> floatmax()
+1.7976931348623157e308
 ```
 """
 floatmax(x::T) where {T<:AbstractFloat} = floatmax(T)
@@ -876,6 +880,11 @@ significand_mask(::Type{Float16}) = 0x03ff
 for T in (Float16, Float32, Float64)
     @eval significand_bits(::Type{$T}) = $(trailing_ones(significand_mask(T)))
     @eval exponent_bits(::Type{$T}) = $(sizeof(T)*8 - significand_bits(T) - 1)
+    @eval exponent_bias(::Type{$T}) = $(Int(exponent_one(T) >> significand_bits(T)))
+    # maximum float exponent
+    @eval exponent_max(::Type{$T}) = $(Int(exponent_mask(T) >> significand_bits(T)) - exponent_bias(T))
+    # maximum float exponent without bias
+    @eval exponent_raw_max(::Type{$T}) = $(Int(exponent_mask(T) >> significand_bits(T)))
 end
 
 # integer size of float

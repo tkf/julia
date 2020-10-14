@@ -2,7 +2,6 @@
 
 #include "llvm-version.h"
 #include "platform.h"
-#include "options.h"
 
 #include <llvm/ExecutionEngine/SectionMemoryManager.h>
 #include "julia.h"
@@ -98,6 +97,7 @@ static bool check_fd_or_close(int fd)
         return false;
     int err = fcntl(fd, F_SETFD, FD_CLOEXEC);
     assert(err == 0);
+    (void)err; // prevent compiler warning
     if (fchmod(fd, S_IRWXU) != 0 ||
         ftruncate(fd, jl_page_size) != 0) {
         close(fd);
