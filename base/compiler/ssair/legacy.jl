@@ -62,10 +62,10 @@ function replace_code_newstyle!(ci::CodeInfo, ir::IRCode, nargs::Int)
         if isa(stmt, GotoNode)
             stmt = GotoNode(first(ir.cfg.blocks[stmt.label].stmts))
         elseif isa(stmt, DetachNode)
-            ci.code[i] = DetachNode(stmt.syncregion, first(ir.cfg.blocks[stmt.label].stmts),
-                                    first(ir.cfg.blocks[stmt.reattach].stmts))
+            stmt = DetachNode(stmt.syncregion, first(ir.cfg.blocks[stmt.label].stmts),
+                              first(ir.cfg.blocks[stmt.reattach].stmts))
         elseif isa(stmt, ReattachNode)
-            ci.code[i] = ReattachNode(stmt.syncregion, first(ir.cfg.blocks[stmt.label].stmts))
+            stmt = ReattachNode(stmt.syncregion, first(ir.cfg.blocks[stmt.label].stmts))
         elseif isa(stmt, GotoIfNot)
             stmt = GotoIfNot(stmt.cond, first(ir.cfg.blocks[stmt.dest].stmts))
         elseif isa(stmt, PhiNode)
