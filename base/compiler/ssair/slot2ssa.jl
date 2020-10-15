@@ -477,11 +477,6 @@ function domsort_ssa!(ir::IRCode, domtree::DomTree)
             else
                 result[inst_range[end]][:inst] = GotoNode(bb_rename[terminator.label])
             end
-        elseif isa(terminator, DetachNode)
-            result_stmts[inst_range[end]] = DetachNode(terminator.syncregion, bb_rename[terminator.label],
-                                                       bb_rename[terminator.reattach])
-        elseif isa(terminator, ReattachNode)
-            result_stmts[inst_range[end]] = ReattachNode(terminator.syncregion, bb_rename[terminator.label])
         elseif isa(terminator, GotoIfNot)
             # Check if we need to break the critical edge
             if bb_rename[bb + 1] != new_bb + 1
@@ -505,6 +500,11 @@ function domsort_ssa!(ir::IRCode, domtree::DomTree)
                 node[:inst], node[:type], node[:line] = GotoNode(bb_rename[bb + 1]), Any, 0
                 inst_range = first(inst_range):(last(inst_range) + 1)
             end
+        elseif isa(terminator, DetachNode)
+            result[inst_range[end]][:inst] = DetachNode(terminator.syncregion, bb_rename[terminator.label],
+                                                        bb_rename[terminator.reattach])
+        elseif isa(terminator, ReattachNode)
+            result[inst_range[end]][:inst] = ReattachNode(terminator.syncregion, bb_rename[terminator.label])
         end
         bb_start_off += length(inst_range)
         local new_preds, new_succs
