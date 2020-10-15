@@ -487,6 +487,11 @@ function domsort_ssa!(ir::IRCode, domtree::DomTree)
                 node[:inst], node[:type], node[:line] = GotoNode(bb_rename[bb + 1]), Any, 0
             end
             result[inst_range[end]][:inst] = GotoIfNot(terminator.cond, bb_rename[terminator.dest])
+        elseif isa(terminator, DetachNode)
+            result[inst_range[end]][:inst] = DetachNode(terminator.syncregion, bb_rename[terminator.label],
+                                                        bb_rename[terminator.reattach])
+        elseif isa(terminator, ReattachNode)
+            result[inst_range[end]][:inst] = ReattachNode(terminator.syncregion, bb_rename[terminator.label])
         elseif !isa(terminator, ReturnNode)
             if isa(terminator, Expr)
                 if terminator.head == :enter
@@ -500,11 +505,6 @@ function domsort_ssa!(ir::IRCode, domtree::DomTree)
                 node[:inst], node[:type], node[:line] = GotoNode(bb_rename[bb + 1]), Any, 0
                 inst_range = first(inst_range):(last(inst_range) + 1)
             end
-        elseif isa(terminator, DetachNode)
-            result[inst_range[end]][:inst] = DetachNode(terminator.syncregion, bb_rename[terminator.label],
-                                                        bb_rename[terminator.reattach])
-        elseif isa(terminator, ReattachNode)
-            result[inst_range[end]][:inst] = ReattachNode(terminator.syncregion, bb_rename[terminator.label])
         end
         bb_start_off += length(inst_range)
         local new_preds, new_succs
