@@ -791,6 +791,7 @@ void addOptimizationPasses(legacy::PassManagerBase *PM, int opt_level,
     PM->add(createDivRemPairsPass());
 #ifdef USE_TAPIR
     PM->add(createLowerTapirToTargetPass());
+    PM->add(createAlwaysInlinerLegacyPass()); // Respect always_inline
     PM->add(createDeadCodeEliminationPass());
     PM->add(createCFGSimplificationPass());
 #endif
