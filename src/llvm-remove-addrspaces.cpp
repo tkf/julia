@@ -56,19 +56,26 @@ public:
         }
         else if (auto Ty = dyn_cast<StructType>(SrcTy)) {
             if (!Ty->isOpaque()) {
+                StructType *DstTy_;
+                if (Ty->hasName()) {
+                    auto Name = std::string(Ty->getName());
+                    Ty->setName(Name + ".bad");
+                    DstTy_ = StructType::create(
+                             Ty->getContext(), Ty->elements(), Name, Ty->isPacked());
+                }
+                else
+                    DstTy_ = StructType::get(
+                             Ty->getContext(), Ty->elements(), Ty->isPacked());
+                // To avoid infinite recursion, shove the placeholder of the DstTy before
+                // recursing into the element types:
+                MappedTypes[SrcTy] = DstTy_;
+
                 auto Els = Ty->getNumElements();
                 SmallVector<Type *, 4> NewElTys(Els);
                 for (unsigned i = 0; i < Els; ++i)
                     NewElTys[i] = remapType(Ty->getElementType(i));
-                if (Ty->hasName()) {
-                    auto Name = std::string(Ty->getName());
-                    Ty->setName(Name + ".bad");
-                    DstTy = StructType::create(
-                            Ty->getContext(), NewElTys, Name, Ty->isPacked());
-                }
-                else
-                    DstTy = StructType::get(
-                            Ty->getContext(), NewElTys, Ty->isPacked());
+                DstTy_->setBody(NewElTys, Ty->isPacked());
+                DstTy = DstTy_;
             }
         }
         else if (auto Ty = dyn_cast<ArrayType>(SrcTy))
