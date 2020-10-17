@@ -166,3 +166,28 @@ end
     @sync_end token
     return x1 + x2
 end
+
+_dummy_mapfold(f, op, xs) = isempty(xs) ? op(f(xs[1]), f(xs[2])) : f(xs[1])
+
+function mapfold(f, op, xs)
+    if length(xs) == 1
+        return @inbounds f(xs[1])
+    elseif length(xs) == 2
+        return @inbounds op(f(xs[1]), f(xs[2]))
+    else
+        left = @inbounds @view xs[begin:(end-begin+1)÷2]
+        right = @inbounds @view xs[(end-begin+1)÷2+1:end]
+        ytype = Core.Compiler.return_type(  # TODO: don't
+            _dummy_mapfold,
+            Tuple{typeof(f),typeof(op),typeof(xs)},
+        )
+        ref = Ref{ytype}()
+        token = @syncregion()
+        @spawn token begin
+            ref[] = mapfold(f, op, right)
+        end
+        y = mapfold(f, op, left)
+        @sync_end token
+        return op(y, ref[])
+    end
+end
