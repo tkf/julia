@@ -1,15 +1,15 @@
-using Libdl
-dlopen("libcilkrts", Libdl.RTLD_GLOBAL)
+# using Libdl
+# dlopen("libcilkrts", Libdl.RTLD_GLOBAL)
 
-nworkers() = ccall(:__cilkrts_get_nworkers, Cint, ())
+# nworkers() = ccall(:__cilkrts_get_nworkers, Cint, ())
 
-"""
-Call `end_cilk()` before you set the number of workers
-"""
-set_nworkers(N) = ccall(:__cilkrts_set_param, Cint, (Cstring, Cstring), "nworkers", string(N)) == 0
+# """
+# Call `end_cilk()` before you set the number of workers
+# """
+# set_nworkers(N) = ccall(:__cilkrts_set_param, Cint, (Cstring, Cstring), "nworkers", string(N)) == 0
 
-end_cilk() = ccall(:__cilkrts_end_cilk, Cvoid, ())
-init_cilk() = ccall(:__cilkrts_init, Cvoid, ())
+# end_cilk() = ccall(:__cilkrts_end_cilk, Cvoid, ())
+# init_cilk() = ccall(:__cilkrts_init, Cvoid, ())
 
 macro syncregion()
     Expr(:syncregion)
@@ -191,3 +191,17 @@ function mapfold(f, op, xs)
         return op(y, ref[])
     end
 end
+
+function append!!(a, b)
+    ys::Vector = a isa Vector ? a : collect(a)
+    if eltype(b) <: eltype(ys)
+        zs = append!(ys, b)
+    else
+        zs = similar(ys, promote_type(eltype(ys), eltype(b)), (length(ys) + lengh(b)))
+        copyto!(zs, 1, ys, 1, length(ys))
+        zs[length(ys)+1:end] .= b
+    end
+    return zs
+end
+
+tmap(f, xs) = mapfold(tuple ∘ f, append!!, xs)

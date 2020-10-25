@@ -75,7 +75,7 @@ endif
 endif
 ifeq ($(USE_TAPIR),1)
 FLAGS += -DUSE_TAPIR
-SRCS += llvm-tapir
+SRCS += llvm-tapir task-tapir
 endif
 else
 RUNTIME_SRCS += anticodegen

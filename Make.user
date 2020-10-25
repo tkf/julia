@@ -1,3 +1,6 @@
+LLVM_GIT_URL = ~/repos/watch/opencilk-project
+LLVM_GIT_VER = tkf-julia
+
 USE_BINARYBUILDER_LLVM=0
 LLVM_VER=svn
 USE_TAPIR=1

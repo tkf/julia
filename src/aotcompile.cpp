@@ -603,7 +603,11 @@ void jl_dump_native(void *native_code,
 
 void addTargetPasses(legacy::PassManagerBase *PM, TargetMachine *TM)
 {
-    PM->add(new TargetLibraryInfoWrapperPass(Triple(TM->getTargetTriple())));
+    TargetLibraryInfoImpl TLII(Triple(TM->getTargetTriple()));
+#ifdef USE_TAPIR
+    TLII.setTapirTarget(jl_tapir_target_factory);
+#endif
+    PM->add(new TargetLibraryInfoWrapperPass(TLII));
     PM->add(createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
 }
 

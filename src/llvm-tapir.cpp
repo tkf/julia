@@ -11,14 +11,15 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Tapir/LoweringUtils.h"
+#include "llvm/Analysis/TapirTaskInfo.h"
 #include <llvm/Support/Debug.h>
 
 #include "codegen_shared.h"
 #include "julia.h"
 #include "julia_internal.h"
-
-#include "julia_assert.h"
+#include "jitlayers.h"
 
 /**
  * JuliaTapir lowers Tapir constructs through outlining to Julia Task's.
@@ -37,9 +38,28 @@
 namespace llvm {
 
 class JuliaTapir : public TapirTarget {
+    ValueToValueMapTy DetachBlockToTaskGroup;
+    ValueToValueMapTy SyncRegionToTaskGroup;
+    Type *SpawnFTy = nullptr;
+
+    // Opaque Julia runtime functions
+    FunctionCallee JlTapirTaskGroup;
+    FunctionCallee JlTapirSpawn;
+    FunctionCallee JlTapirSync;
+
+    // Accessors for opaque Julia runtime functions
+    FunctionCallee get_jl_tapir_taskgroup();
+    FunctionCallee get_jl_tapir_spawn();
+    FunctionCallee get_jl_tapir_sync();
+
     public:
-        JuliaTapir(Module &M) : TapirTarget(M) {}
+        JuliaTapir(Module &M);
         ~JuliaTapir() {}
+
+        ArgStructMode getArgStructMode() const override final {
+            return ArgStructMode::Static;
+            // return ArgStructMode::Dynamic;
+        }
 
         Value *lowerGrainsizeCall(CallInst *GrainsizeCall) override final;
         void lowerSync(SyncInst &inst) override final;
@@ -61,6 +81,62 @@ class JuliaTapir : public TapirTarget {
             override final;
 };
 
+JuliaTapir::JuliaTapir(Module &M) : TapirTarget(M) {
+    LLVMContext &C = M.getContext();
+    // Initialize any types we need for lowering.
+    SpawnFTy = PointerType::getUnqual(
+        FunctionType::get(Type::getVoidTy(C), { Type::getInt8PtrTy(C) }, false));
+}
+
+FunctionCallee JuliaTapir::get_jl_tapir_taskgroup() {
+    if (JlTapirTaskGroup)
+        return JlTapirTaskGroup;
+
+    LLVMContext &C = M.getContext();
+    AttributeList AL;
+    FunctionType *FTy = FunctionType::get(Type::getInt8PtrTy(C), {}, false);
+
+    JlTapirTaskGroup = M.getOrInsertFunction("jl_tapir_taskgroup", FTy, AL);
+    return JlTapirTaskGroup;
+}
+
+FunctionCallee JuliaTapir::get_jl_tapir_spawn() {
+    if (JlTapirSpawn)
+        return JlTapirSpawn;
+
+    LLVMContext &C = M.getContext();
+    const DataLayout &DL = M.getDataLayout();
+    AttributeList AL;
+    FunctionType *FTy = FunctionType::get(
+        Type::getVoidTy(C),
+        {
+            Type::getInt8PtrTy(C), // jl_value_t *tasks
+            Type::getInt8PtrTy(C), // void *f
+            Type::getInt8PtrTy(C), // void *arg
+            DL.getIntPtrType(C),   // size_t arg_size
+        },
+        false);
+
+    JlTapirSpawn = M.getOrInsertFunction("jl_tapir_spawn", FTy, AL);
+    return JlTapirSpawn;
+}
+
+FunctionCallee JuliaTapir::get_jl_tapir_sync() {
+    if (JlTapirSync)
+        return JlTapirSync;
+
+    LLVMContext &C = M.getContext();
+    AttributeList AL;
+    FunctionType *FTy = FunctionType::get(
+        Type::getVoidTy(C),
+        {
+            Type::getInt8PtrTy(C), // jl_value_t *tasks
+        },
+        false);
+
+    JlTapirSync = M.getOrInsertFunction("jl_tapir_sync", FTy, AL);
+    return JlTapirSync;
+}
 
 Value *JuliaTapir::lowerGrainsizeCall(CallInst *GrainsizeCall) {
     Value *Limit = GrainsizeCall->getArgOperand(0);
@@ -97,22 +173,45 @@ Value *JuliaTapir::lowerGrainsizeCall(CallInst *GrainsizeCall) {
 }
 
 void JuliaTapir::lowerSync(SyncInst &SI) {
-    Function &Fn = *(SI.getParent()->getParent());
-    Module &M = *(Fn.getParent());
-
-    // TODO:
-    // Emit call to Base.sync_end(tasklist)
-    // CallInst *CI = CallInst::Create()
-
-    // remove sync instruction
-    // CI->setDebugLoc(SI.getDebugLoc());
-    // BasicBlock *Succ = SI.getSuccessor(0);
-    // SI.eraseFromParent();
-    // BranchInst::Create(Succ, CI->getParent());
+    IRBuilder<> builder(&SI);
+    Value* SR = SI.getSyncRegion();
+    auto TG = SyncRegionToTaskGroup[SR];
+    builder.CreateCall(get_jl_tapir_sync(), {TG});
+    BranchInst *PostSync = BranchInst::Create(SI.getSuccessor(0));
+    ReplaceInstWithInst(&SI, PostSync);
 }
 
 void JuliaTapir::preProcessFunction(Function &F, TaskInfo &TI, bool OutliningTapirLoops) {
-    // nothing
+    if (OutliningTapirLoops) // TODO: figure out if we need to do something
+        return;
+
+    for (Task *T : post_order(TI.getRootTask())) {
+        if (T->isRootTask())
+            continue;
+        DetachInst *Detach = T->getDetach();
+        BasicBlock *detB = Detach->getParent();
+        Value *SR = Detach->getSyncRegion();
+
+        // Sync regions and task groups are one-to-one. However, since multiple
+        // detach instructions can be invoked in a single sync region, we check
+        // if a corresponding task group is created.
+        Value *TG = SyncRegionToTaskGroup[SR];
+        if (!TG) {
+            // Create a taskgroup for each SyncRegion by calling
+            // `jl_tapir_taskgroup` at the beggining of the function.:
+            TG = CallInst::Create(
+                get_jl_tapir_taskgroup(),
+                {},
+                "",
+                F.getEntryBlock().getTerminator());
+            SyncRegionToTaskGroup[SR] = TG;
+            // ASK: Can I rely on the GC to manage `TG`?
+        }
+        // TODO: don't look up the map twice
+        if (!DetachBlockToTaskGroup[detB]) {
+            DetachBlockToTaskGroup[detB] = TG;
+        }
+    }
 }
 
 void JuliaTapir::postProcessFunction(Function &F, bool OutliningTapirLoops) {
@@ -136,29 +235,74 @@ void JuliaTapir::postProcessOutlinedTask(Function &F, Instruction *DetachPt,
 }
 
 void JuliaTapir::preProcessRootSpawner(Function &F) {
-    // TODO:
-    // create tasklist
+    // nothing
 }
 
 void JuliaTapir::postProcessRootSpawner(Function &F) {
-    // TODO:
-    // create tasklist
+    // nothing
 }
 
+// Based on QthreadsABI
 void JuliaTapir::processSubTaskCall(TaskOutlineInfo &TOI, DominatorTree &DT) {
+    Function *Outlined = TOI.Outline;
     Instruction *ReplStart = TOI.ReplStart;
-    // Call to detached function
-    Instruction *ReplCall = TOI.ReplCall;
+    CallBase *ReplCall = cast<CallBase>(TOI.ReplCall);
+    BasicBlock *CallBlock = ReplStart->getParent();
 
-    Function &F = *ReplCall->getParent()->getParent();
-    Module &M = *F.getParent();
+    LLVMContext &C = M.getContext();
+    const DataLayout &DL = M.getDataLayout();
 
-    // TODO:
-    // replace call to detach function with a
-    // t = Task(ReplCall, args...)
-    // push!(t, task)
-    // schedule(t)
+    // At this point, we have a call in the parent to a function containing the
+    // task body.  That function takes as its argument a pointer to a structure
+    // containing the inputs to the task body.  This structure is initialized in
+    // the parent immediately before the call.
 
+    // Construct a call to jl_tapir_spawn:
+    IRBuilder<> CallerIRBuilder(ReplCall);
+    Value *OutlinedFnPtr = CallerIRBuilder.CreatePointerBitCastOrAddrSpaceCast(
+        Outlined, SpawnFTy);
+    AllocaInst *CallerArgStruct = cast<AllocaInst>(ReplCall->getArgOperand(0));
+    Type *ArgsTy = CallerArgStruct->getAllocatedType();
+    Value *ArgStructPtr = CallerIRBuilder.CreateBitCast(CallerArgStruct,
+                                                        Type::getInt8PtrTy(C));
+    ConstantInt *ArgSize = ConstantInt::get(DL.getIntPtrType(C),
+                                            DL.getTypeAllocSize(ArgsTy));
+
+    // Get the task group handle associatated with this detach instruction.
+    // (NOTE: Since detach instruction is a terminator, we can use the basic
+    // block containing it to identify the detach.)
+    // TODO: Find a better/safer way?
+    // TODO: Do I have access to task group inside nested tasks?
+    // TODO: (If so, when are unneeded task groups cleaned up?)
+    // Value *TaskGroupPtr = DetachBlockToTaskGroup[TOI.DetachPt->getParent()];
+    //
+    // ASK: `TOI.DetachPt` not always defined?
+    Value *TaskGroupPtr = DetachBlockToTaskGroup[TOI.ReplCall->getParent()];
+
+    CallInst *Call = CallerIRBuilder.CreateCall(
+        get_jl_tapir_spawn(),
+        {
+            TaskGroupPtr,  // jl_value_t *tasks
+            OutlinedFnPtr, // void *f
+            ArgStructPtr,  // void *arg
+            ArgSize,       // size_t arg_size
+        });
+    Call->setDebugLoc(ReplCall->getDebugLoc());
+    TOI.replaceReplCall(Call);
+    ReplCall->eraseFromParent();
+
+    CallerIRBuilder.SetInsertPoint(ReplStart);
+    CallerIRBuilder.CreateLifetimeStart(CallerArgStruct, ArgSize);
+    CallerIRBuilder.SetInsertPoint(CallBlock, ++Call->getIterator());
+    CallerIRBuilder.CreateLifetimeEnd(CallerArgStruct, ArgSize);
+
+    if (TOI.ReplUnwind)
+        // TODO: Copied from Qthread; do we still need this?
+        BranchInst::Create(TOI.ReplRet, CallBlock);
 }
 
 } // namespace LLVM
+
+llvm::TapirTarget *jl_tapir_target_factory(llvm::Module &M) {
+    return new llvm::JuliaTapir(M);
+}
