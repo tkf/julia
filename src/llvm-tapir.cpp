@@ -20,6 +20,7 @@
 #include "julia.h"
 #include "julia_internal.h"
 #include "jitlayers.h"
+#include "llvm-pass-helpers.h"
 
 /**
  * JuliaTapir lowers Tapir constructs through outlining to Julia Task's.
@@ -37,7 +38,7 @@
 
 namespace llvm {
 
-class JuliaTapir : public TapirTarget {
+class JuliaTapir : public TapirTarget, private JuliaPassContext {
     ValueToValueMapTy DetachBlockToTaskGroup;
     ValueToValueMapTy SyncRegionToTaskGroup;
     Type *SpawnFTy = nullptr;
@@ -82,6 +83,7 @@ class JuliaTapir : public TapirTarget {
 };
 
 JuliaTapir::JuliaTapir(Module &M) : TapirTarget(M) {
+    initAll(M);
     LLVMContext &C = M.getContext();
     // Initialize any types we need for lowering.
     SpawnFTy = PointerType::getUnqual(
@@ -92,9 +94,8 @@ FunctionCallee JuliaTapir::get_jl_tapir_taskgroup() {
     if (JlTapirTaskGroup)
         return JlTapirTaskGroup;
 
-    LLVMContext &C = M.getContext();
     AttributeList AL;
-    FunctionType *FTy = FunctionType::get(Type::getInt8PtrTy(C), {}, false);
+    FunctionType *FTy = FunctionType::get(T_prjlvalue, {}, false);
 
     JlTapirTaskGroup = M.getOrInsertFunction("jl_tapir_taskgroup", FTy, AL);
     return JlTapirTaskGroup;
@@ -110,7 +111,7 @@ FunctionCallee JuliaTapir::get_jl_tapir_spawn() {
     FunctionType *FTy = FunctionType::get(
         Type::getVoidTy(C),
         {
-            Type::getInt8PtrTy(C), // jl_value_t *tasks
+            T_prjlvalue,           // jl_value_t *tasks
             Type::getInt8PtrTy(C), // void *f
             Type::getInt8PtrTy(C), // void *arg
             DL.getIntPtrType(C),   // size_t arg_size
@@ -127,12 +128,7 @@ FunctionCallee JuliaTapir::get_jl_tapir_sync() {
 
     LLVMContext &C = M.getContext();
     AttributeList AL;
-    FunctionType *FTy = FunctionType::get(
-        Type::getVoidTy(C),
-        {
-            Type::getInt8PtrTy(C), // jl_value_t *tasks
-        },
-        false);
+    FunctionType *FTy = FunctionType::get(Type::getVoidTy(C), {T_prjlvalue}, false);
 
     JlTapirSync = M.getOrInsertFunction("jl_tapir_sync", FTy, AL);
     return JlTapirSync;
@@ -202,7 +198,6 @@ void JuliaTapir::preProcessFunction(Function &F, TaskInfo &TI, bool OutliningTap
                 "",
                 F.getEntryBlock().getTerminator());
             SyncRegionToTaskGroup[SR] = TG;
-            // ASK: Can I rely on the GC to manage `TG`?
         }
         // TODO: don't look up the map twice
         if (!DetachBlockToTaskGroup[detB]) {
@@ -236,7 +231,38 @@ void JuliaTapir::preProcessRootSpawner(Function &F) {
 }
 
 void JuliaTapir::postProcessRootSpawner(Function &F) {
-    // nothing
+    bool need_gc_frame = false;
+    for (BasicBlock &BB : F) {
+        for (Instruction &I : BB) {
+            if (CallInst *TG = dyn_cast<CallInst>(&I)) {
+                if (TG->getCalledFunction() == get_jl_tapir_taskgroup().getCallee()) {
+                    // "Put `TG` in `GC.@preserve`":
+                    Value *gctoken = CallInst::Create(
+                        gc_preserve_begin_func,
+                        {TG},
+                        "",
+                        BB.getTerminator());
+                    // Make sure we "close `GC.@preserve`":
+                    for (BasicBlock &BB2 : F) {
+                        if (isa<ReturnInst>(BB2.getTerminator())) {
+                            CallInst::Create(gc_preserve_end_func, {gctoken}, "", BB2.getTerminator());
+                        }
+                    }
+                    need_gc_frame = true;
+                }
+            }
+        }
+    }
+    if (need_gc_frame && !getPtls(F)) {
+        // Do what `allocate_gc_frame` (`codegen.cpp`) does:
+        CallInst::Create(
+            ptls_getter,
+            {},
+            "",
+            F.getEntryBlock().getFirstNonPHI());
+        assert(getPtls(F));
+        // TODO: other things in `allocate_gc_frame`
+    }
 }
 
 // Based on QthreadsABI

@@ -764,6 +764,12 @@ void addOptimizationPasses(legacy::PassManagerBase *PM, int opt_level,
 
     PM->add(createAggressiveDCEPass());
 
+#ifdef USE_TAPIR
+    PM->add(createLowerTapirToTargetPass());
+    PM->add(createAlwaysInlinerLegacyPass()); // Respect always_inline
+    PM->add(createDeadCodeEliminationPass());
+    PM->add(createCFGSimplificationPass());
+#endif
     if (lower_intrinsics) {
         // LowerPTLS removes an indirect call. As a result, it is likely to trigger
         // LLVM's devirtualization heuristics, which would result in the entire
@@ -793,12 +799,6 @@ void addOptimizationPasses(legacy::PassManagerBase *PM, int opt_level,
     }
     PM->add(createCombineMulAddPass());
     PM->add(createDivRemPairsPass());
-#ifdef USE_TAPIR
-    PM->add(createLowerTapirToTargetPass());
-    PM->add(createAlwaysInlinerLegacyPass()); // Respect always_inline
-    PM->add(createDeadCodeEliminationPass());
-    PM->add(createCFGSimplificationPass());
-#endif
 #if defined(JL_ASAN_ENABLED)
     PM->add(createAddressSanitizerFunctionPass());
 #endif
