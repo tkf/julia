@@ -16,14 +16,9 @@ struct OutlinedFunction
     arg::Vector{UInt8}
 end
 
-function call(outlined::OutlinedFunction)
-    ccall(outlined.f, Cvoid, (Ptr{UInt8},), outlined.arg)
-    return nothing
-end
-
 function (outlined::OutlinedFunction)()
     # TODO: propagate world age of the callee?
-    Base.invokelatest(call, outlined)
+    ccall(outlined.f, Cvoid, (Ptr{UInt8},), outlined.arg)
     return nothing
 end
 
