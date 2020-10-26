@@ -26,6 +26,16 @@ end
     @test fib(5) == 5
 end
 
+@testset "vecadd!" begin
+    @test vecadd!([0], [1], [2]) == [3]
+    @testset for n in [10, 1000, 3000]
+        A = randn(n)
+        B = randn(n)
+        out = zero(A)
+        @test vecadd!(out, A, B) == A .+ B
+    end
+end
+
 @noinline always() = rand() <= 1
 @noinline donothing() = always() || error("unreachable")
 

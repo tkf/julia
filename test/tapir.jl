@@ -34,7 +34,7 @@ function taskloop3(N)
     end
 end
 
-function vecadd(out, A, B)
+function vecadd!(out, A, B)
     @assert length(out) == length(A) == length(B)
     @inbounds begin
         @par for i in 1:length(out)
