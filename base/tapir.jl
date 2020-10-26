@@ -23,7 +23,7 @@ function (outlined::OutlinedFunction)()
 end
 
 # taskgroup() = Task[]
-taskgroup() = Channel{Task}(4)
+taskgroup() = Channel{Task}(Inf)
 
 function spawn!(tasks::TaskGroup, f::Ptr{Cvoid}, parg::Ptr{UInt8}, arg_size::Int64)
     # ASK: Do we need to copy `arg` here? It looks like that's what
