@@ -144,10 +144,7 @@ Value *JuliaTapir::lowerGrainsizeCall(CallInst *GrainsizeCall) {
     IRBuilder<> Builder(GrainsizeCall);
 
     // get jl_n_threads (extern global variable)
-    GlobalVariable *proto = new GlobalVariable(*M, Type::getInt32Ty(M->getContext()),
-                           false, GlobalVariable::ExternalLinkage,
-                           NULL, "jl_n_threads");
-    M->getGlobalList().push_back(proto);
+    Constant *proto = M->getOrInsertGlobal("jl_n_threads", Type::getInt32Ty(M->getContext()));
 
     Value *Workers = Builder.CreateLoad(proto);
 
