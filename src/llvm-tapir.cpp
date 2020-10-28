@@ -112,7 +112,7 @@ FunctionCallee JuliaTapir::get_jl_tapir_spawn() {
         Type::getVoidTy(C),
         {
             T_prjlvalue,           // jl_value_t *tasks
-            Type::getInt8PtrTy(C), // void *f
+            SpawnFTy,              // void *f
             Type::getInt8PtrTy(C), // void *arg
             DL.getIntPtrType(C),   // size_t arg_size
         },
