@@ -294,12 +294,8 @@ void JuliaTapir::processSubTaskCall(TaskOutlineInfo &TOI, DominatorTree &DT) {
     // Get the task group handle associatated with this detach instruction.
     // (NOTE: Since detach instruction is a terminator, we can use the basic
     // block containing it to identify the detach.)
-    // TODO: Find a better/safer way?
     // TODO: Do I have access to task group inside nested tasks?
     // TODO: (If so, when are unneeded task groups cleaned up?)
-    // Value *TaskGroupPtr = DetachBlockToTaskGroup[TOI.DetachPt->getParent()];
-    //
-    // ASK: `TOI.DetachPt` not always defined?
     Value *TaskGroupPtr = DetachBlockToTaskGroup[TOI.ReplCall->getParent()];
 
     CallInst *Call = CallerIRBuilder.CreateCall(
