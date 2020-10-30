@@ -83,11 +83,26 @@ class JuliaTapir : public TapirTarget, private JuliaPassContext {
 };
 
 JuliaTapir::JuliaTapir(Module &M) : TapirTarget(M) {
-    initAll(M);
     LLVMContext &C = M.getContext();
     // Initialize any types we need for lowering.
     SpawnFTy = PointerType::getUnqual(
         FunctionType::get(Type::getVoidTy(C), { Type::getInt8PtrTy(C) }, false));
+
+    initAll(M);
+
+    // Ideally, we can rely on `initAll(M)` to set up all runtime functions.
+    // However, it does not set up the functions; i.e., it relies on that they
+    // are created in `emit_function`. Since we are adding *new* GC roots, we
+    // need to manually make sure that these functions are set up, even though
+    // these functions are not inserted in the emission phase. The function
+    // signatures have to be matched with the ones in `codegen.cpp` (see
+    // `gc_preserve_begin_func = new JuliaFunction{...}` etc.).
+    gc_preserve_begin_func = cast<Function>(M.getOrInsertFunction(
+        "llvm.julia.gc_preserve_begin",
+        FunctionType::get(Type::getTokenTy(C), true)).getCallee());
+    gc_preserve_end_func = cast<Function>(M.getOrInsertFunction(
+        "llvm.julia.gc_preserve_end",
+        FunctionType::get(Type::getVoidTy(C), {Type::getTokenTy(C)}, false)).getCallee());
 }
 
 FunctionCallee JuliaTapir::get_jl_tapir_taskgroup() {
