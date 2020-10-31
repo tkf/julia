@@ -78,6 +78,8 @@ void GCInvariantVerifier::visitAddrSpaceCastInst(AddrSpaceCastInst &I) {
           ToAS   == AddressSpace::CalleeRooted ||
           ToAS   == AddressSpace::Derived,
           "Illegal address space cast from tracked ptr", &I);
+    if (I.getMetadata("julia.tapir.addrspacecast"))
+        return;
     Check(FromAS != AddressSpace::CalleeRooted &&
           FromAS != AddressSpace::Derived,
           "Illegal address space cast from decayed ptr", &I);
@@ -105,6 +107,8 @@ void GCInvariantVerifier::visitLoadInst(LoadInst &LI) {
     Type *Ty = LI.getType();
     if (Ty->isPointerTy()) {
         unsigned AS = cast<PointerType>(Ty)->getAddressSpace();
+        if (LI.getMetadata("julia.tapir.load"))
+            return;
         Check(AS != AddressSpace::CalleeRooted &&
               AS != AddressSpace::Derived,
               "Illegal load of gc relevant value", &LI);

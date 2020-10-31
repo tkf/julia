@@ -53,6 +53,9 @@ class JuliaTapir : public TapirTarget, private JuliaPassContext {
     FunctionCallee get_jl_tapir_spawn();
     FunctionCallee get_jl_tapir_sync();
 
+    void replaceDecayedPointerInArgStruct(TaskOutlineInfo &);
+    void replaceDecayedPointerInOutline(Function &);
+
     public:
         JuliaTapir(Module &M);
         ~JuliaTapir() {}
@@ -280,8 +283,116 @@ void JuliaTapir::postProcessRootSpawner(Function &F) {
     }
 }
 
+// Extract out the index value used by GEP created in LLVM/Tapir's
+// `createTaskArgsStruct`:
+uint64_t structFieldIndex(GetElementPtrInst *GEP) {
+    auto LastIdx = cast<ConstantInt>(*(GEP->op_end()-1));
+    return LastIdx->getValue().getLimitedValue();
+}
+
+// Replace decayed pointers in the argument struct with `AddressSpace::Generic`.
+// See: `GCInvariantVerifier::visitStoreInst`.
+void JuliaTapir::replaceDecayedPointerInArgStruct(TaskOutlineInfo &TOI) {
+    CallBase *ReplCall = cast<CallBase>(TOI.ReplCall);
+    BasicBlock *CallBlock = TOI.ReplStart->getParent();
+
+    LLVMContext &C = M.getContext();
+
+    // Compute the new field types. (Also check if we need to cast struct fields).
+    bool need_cast = false;
+    AllocaInst *CallerArgStruct = cast<AllocaInst>(ReplCall->getArgOperand(0));
+    Type *ArgsTy0 = CallerArgStruct->getAllocatedType();
+    auto OldInputSet = TOI.InputSet;
+    auto NewInputSet = SmallVector<Value*, 8>(TOI.InputSet.begin(), TOI.InputSet.end());
+    size_t NumInputs = OldInputSet.size();
+    assert(NumInputs == ArgsTy0->getStructNumElements());
+    for (size_t i = 0; i < NumInputs; i++) {
+        auto V0 = NewInputSet[i];
+        assert(V0->getType() == ArgsTy0->getStructElementType(i));
+        if (auto *VTy = dyn_cast<PointerType>(V0->getType())) {
+            unsigned AS = VTy->getAddressSpace();
+            if (AS == AddressSpace::CalleeRooted || AS == AddressSpace::Derived) {
+                auto V = BitCastInst::Create(
+                    Instruction::AddrSpaceCast,
+                    V0,
+                    PointerType::get(VTy->getElementType(), AddressSpace::Generic),
+                    "undecay",
+                    CallerArgStruct);
+                auto T_int1 = Type::getInt1Ty(C);
+                auto MD = MDNode::get(C, ConstantAsMetadata::get(ConstantInt::get(T_int1, true)));
+                V->setMetadata("julia.tapir.addrspacecast", MD);
+                // TODO: Don't add the instruction here.
+                NewInputSet[i] = V;
+                need_cast = true;
+            }
+        }
+    }
+    if (!need_cast)
+        return;
+
+    TOI.InputSet = ValueSet(NewInputSet.begin(), NewInputSet.end());
+    // ASK: Should We? Does LLVM treat `TOI` as an input + *output* argument?
+
+    // Create a new struct type:
+    SmallVector<Type*, 8> NewInputTypes;
+    NewInputTypes.reserve(NumInputs);
+    for (auto V: NewInputSet) {
+        NewInputTypes.push_back(V->getType());
+    }
+    StructType *ArgsTy = StructType::create(C, NewInputTypes);
+
+    // Replace the instructions to use the new type we just created:
+    CallerArgStruct->setAllocatedType(ArgsTy);
+    SmallVector<StoreInst*, 8> StoreList;
+    StoreList.resize(TOI.InputSet.size());
+    for (Instruction &V: *CallBlock) {
+        if (auto GEP = dyn_cast<GetElementPtrInst>(&V);
+            GEP && GEP->getPointerOperand() == CallerArgStruct)
+        {
+            auto LastIdx = structFieldIndex(GEP);
+            GEP->setResultElementType(ArgsTy->getTypeAtIndex(LastIdx));
+            GEP->setSourceElementType(ArgsTy);
+        } else if (auto Store = dyn_cast<StoreInst>(&V))
+        {
+            auto GEP = dyn_cast<GetElementPtrInst>(Store->getOperand(1));
+            if (GEP && GEP->getPointerOperand() == CallerArgStruct) {
+                auto LastIdx = structFieldIndex(GEP);
+                StoreList[LastIdx] = Store;
+            }
+        }
+    }
+    for (size_t i = 0; i < NumInputs; i++) {
+        auto Store = StoreList[i];
+        assert(Store->getOperand(0) == OldInputSet[i]);
+        Store->setOperand(0, NewInputSet[i]);
+    }
+
+    replaceDecayedPointerInOutline(*TOI.Outline);
+}
+
+void JuliaTapir::replaceDecayedPointerInOutline(Function &Outline) {
+    LLVMContext &C = M.getContext();
+    assert(Outline.arg_size() == 1);
+    Value *Arg = Outline.args().begin();
+    for (BasicBlock &BB : Outline) {
+        for (Instruction &I : BB) {
+            auto Load = dyn_cast<LoadInst>(&I);
+            if (!Load)
+                continue;
+            auto GEP = dyn_cast<GetElementPtrInst>(Load->getPointerOperand());
+            if (!(GEP && GEP->getPointerOperand() == Arg))
+                continue;
+            auto T_int1 = Type::getInt1Ty(C);
+            auto MD = MDNode::get(C, ConstantAsMetadata::get(ConstantInt::get(T_int1, true)));
+            I.setMetadata("julia.tapir.load", MD);
+        }
+    }
+}
+
 // Based on QthreadsABI
 void JuliaTapir::processSubTaskCall(TaskOutlineInfo &TOI, DominatorTree &DT) {
+    replaceDecayedPointerInArgStruct(TOI);
+
     Function *Outlined = TOI.Outline;
     Instruction *ReplStart = TOI.ReplStart;
     CallBase *ReplCall = cast<CallBase>(TOI.ReplCall);
