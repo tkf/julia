@@ -205,7 +205,7 @@ function strip_trailing_junk!(ci::CodeInfo, code::Vector{Any}, info::Vector{Any}
     # happen for implicit return on dead branches.
     term = code[end]
     if !isa(term, GotoIfNot) && !isa(term, GotoNode) && !isa(term, ReturnNode) &&
-       !isa(term, DetachNode) && !isa(term, ReattachNode) && !(isa, SyncNode)
+       !isa(term, DetachNode) && !isa(term, ReattachNode) && !isa(term, SyncNode)
         push!(code, ReturnNode())
         push!(ci.ssavaluetypes, Union{})
         push!(ci.codelocs, 0)
