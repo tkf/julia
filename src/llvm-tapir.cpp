@@ -441,7 +441,7 @@ void JuliaTapir::processSubTaskCall(TaskOutlineInfo &TOI, DominatorTree &DT) {
     TOI.replaceReplCall(Call);
     ReplCall->eraseFromParent();
 
-    CallerIRBuilder.SetInsertPoint(ReplStart);
+    CallerIRBuilder.SetInsertPoint(Call);
     CallerIRBuilder.CreateLifetimeStart(CallerArgStruct, ArgSize);
     CallerIRBuilder.SetInsertPoint(CallBlock, ++Call->getIterator());
     CallerIRBuilder.CreateLifetimeEnd(CallerArgStruct, ArgSize);
