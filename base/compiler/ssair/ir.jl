@@ -993,9 +993,13 @@ function process_node!(compact::IncrementalCompact, result_idx::Int, inst::Instr
         stmt = renumber_ssa2!(stmt, ssa_rename, used_ssas, late_fixup, result_idx, do_rename_ssa)
         if compact.cfg_transforms_enabled
             if isa(stmt, DetachNode)
-                stmt = DetachNode(stmt.syncregion, compact.bb_rename[stmt.label], compact.bb_rename[stmt.reattach])
+                stmt = DetachNode(
+                    stmt.syncregion,
+                    compact.bb_rename_succ[stmt.label],
+                    compact.bb_rename_succ[stmt.reattach],
+                )
             elseif isa(stmt, ReattachNode)
-                stmt = ReattachNode(stmt.syncregion, compact.bb_rename[stmt.label])
+                stmt = ReattachNode(stmt.syncregion, compact.bb_rename_succ[stmt.label])
             end
         end
         result[result_idx][:inst] = stmt
