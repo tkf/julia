@@ -298,37 +298,42 @@ void JuliaTapir::replaceDecayedPointerInArgStruct(TaskOutlineInfo &TOI) {
 
     LLVMContext &C = M.getContext();
 
-    // Compute the new field types. (Also check if we need to cast struct fields).
-    bool need_cast = false;
+    // Check if we need to cast struct fields.
     AllocaInst *CallerArgStruct = cast<AllocaInst>(ReplCall->getArgOperand(0));
     Type *ArgsTy0 = CallerArgStruct->getAllocatedType();
     auto OldInputSet = TOI.InputSet;
-    auto NewInputSet = SmallVector<Value*, 8>(TOI.InputSet.begin(), TOI.InputSet.end());
     size_t NumInputs = OldInputSet.size();
+    SmallVector<size_t, 8> NeedCast;
     assert(NumInputs == ArgsTy0->getStructNumElements());
     for (size_t i = 0; i < NumInputs; i++) {
-        auto V0 = NewInputSet[i];
+        auto V0 = OldInputSet[i];
         assert(V0->getType() == ArgsTy0->getStructElementType(i));
         if (auto *VTy = dyn_cast<PointerType>(V0->getType())) {
             unsigned AS = VTy->getAddressSpace();
             if (AS == AddressSpace::CalleeRooted || AS == AddressSpace::Derived) {
-                auto V = BitCastInst::Create(
-                    Instruction::AddrSpaceCast,
-                    V0,
-                    PointerType::get(VTy->getElementType(), AddressSpace::Generic),
-                    "undecay",
-                    CallerArgStruct);
-                auto T_int1 = Type::getInt1Ty(C);
-                auto MD = MDNode::get(C, ConstantAsMetadata::get(ConstantInt::get(T_int1, true)));
-                V->setMetadata("julia.tapir.addrspacecast", MD);
-                // TODO: Don't add the instruction here.
-                NewInputSet[i] = V;
-                need_cast = true;
+                NeedCast.push_back(i);
             }
         }
     }
-    if (!need_cast)
+    if (NeedCast.empty())
         return;
+
+    // Compute the new field types.
+    auto NewInputSet = SmallVector<Value*, 8>(TOI.InputSet.begin(), TOI.InputSet.end());
+    for (auto i: NeedCast) {
+        auto V0 = NewInputSet[i];
+        auto *VTy = cast<PointerType>(V0->getType());
+        auto V = BitCastInst::Create(
+            Instruction::AddrSpaceCast,
+            V0,
+            PointerType::get(VTy->getElementType(), AddressSpace::Generic),
+            "undecay",
+            CallerArgStruct);
+        auto T_int1 = Type::getInt1Ty(C);
+        auto MD = MDNode::get(C, ConstantAsMetadata::get(ConstantInt::get(T_int1, true)));
+        V->setMetadata("julia.tapir.addrspacecast", MD);
+        NewInputSet[i] = V;
+    }
 
     TOI.InputSet = ValueSet(NewInputSet.begin(), NewInputSet.end());
     // ASK: Should We? Does LLVM treat `TOI` as an input + *output* argument?
