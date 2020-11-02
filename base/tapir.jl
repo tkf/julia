@@ -16,11 +16,16 @@ struct OutlinedFunction
     arg::Vector{UInt8}
 end
 
-function (outlined::OutlinedFunction)()
+(outlined::OutlinedFunction)() = Base.invokelatest(call, outlined)
+
+function call(outlined::OutlinedFunction)
     # TODO: propagate world age of the callee?
     ccall(outlined.f, Cvoid, (Ptr{UInt8},), outlined.arg)
     return nothing
 end
+
+@assert precompile(Tuple{OutlinedFunction})
+@assert precompile(call, (OutlinedFunction,))
 
 # taskgroup() = Task[]
 taskgroup() = Channel{Task}(Inf)
