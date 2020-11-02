@@ -11,6 +11,9 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/IRBuilder.h>
+#ifdef JL_DEBUG_BUILD
+#include <llvm/IR/Verifier.h>
+#endif
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Tapir/LoweringUtils.h"
 #include "llvm/Analysis/TapirTaskInfo.h"
@@ -54,7 +57,7 @@ class JuliaTapir : public TapirTarget, private JuliaPassContext {
     FunctionCallee get_jl_tapir_sync();
 
     void replaceDecayedPointerInArgStruct(TaskOutlineInfo &);
-    void replaceDecayedPointerInOutline(Function &);
+    void replaceDecayedPointerInOutline(TaskOutlineInfo &);
 
     void insertGCPreserve(Function &);
     void insertPtls(Function &);
@@ -319,26 +322,129 @@ void JuliaTapir::replaceDecayedPointerInArgStruct(TaskOutlineInfo &TOI) {
         V.setMetadata("julia.tapir.store", MD);
     }
 
-    replaceDecayedPointerInOutline(*TOI.Outline);
+    replaceDecayedPointerInOutline(TOI);
 }
 
-void JuliaTapir::replaceDecayedPointerInOutline(Function &Outline) {
+static PointerType *needAddrSpaceCast(Type *T) {
+    auto PT = dyn_cast<PointerType>(T);
+    if (PT && (PT->getAddressSpace() == AddressSpace::CalleeRooted ||
+               PT->getAddressSpace() == AddressSpace::Derived)) {
+        return PT;
+    } else {
+        return nullptr;
+    }
+}
+
+static PointerType *castTypeForGC(PointerType *T) {
+    return PointerType::get(T->getElementType(), AddressSpace::Tracked);
+}
+
+// Replace the address space of fields of the argument struct.
+void JuliaTapir::replaceDecayedPointerInOutline(TaskOutlineInfo &TOI) {
     LLVMContext &C = M.getContext();
-    assert(Outline.arg_size() == 1);
-    Value *Arg = Outline.args().begin();
-    for (BasicBlock &BB : Outline) {
-        for (Instruction &I : BB) {
+    Function *F = TOI.Outline;
+    FunctionType *FTy = F->getFunctionType();
+    assert(FTy->getNumParams() == 1);
+    auto STy = cast<StructType>(cast<PointerType>(FTy->getParamType(0))->getElementType());
+
+    bool need_change = false;
+    SmallVector<Type*, 8> FieldTypes;
+    auto NumFields = STy->getStructNumElements();
+    FieldTypes.resize(NumFields);
+    for (size_t i = 0; i < NumFields; i++) {
+        auto T0 = STy->getStructElementType(i);
+        if (auto PT0 = needAddrSpaceCast(T0)) {
+            FieldTypes[i] = castTypeForGC(PT0);
+            need_change = true;
+        } else {
+            FieldTypes[i] = T0;
+        }
+    }
+    StructType *NSTy = StructType::create(C, FieldTypes);
+    PointerType *NPTy = PointerType::getUnqual(NSTy);
+    FunctionType *NFTy = FunctionType::get(FTy->getReturnType(), {NPTy}, FTy->isVarArg());
+
+    // TODO: enable this
+    // if (!need_change)
+    //     return;
+
+    Function *NF = Function::Create(NFTy, F->getLinkage(), F->getAddressSpace(),
+                                    // F->getName() + ".jltapir",
+                                    F->getName(), // maybe add suffix?
+                                    F->getParent());
+    NF->copyAttributesFrom(F);
+    NF->setComdat(F->getComdat());
+    // Note: For an example of code changing function, see:
+    // llvm/lib/Transforms/IPO/DeadArgumentElimination.cpp
+
+    // Copy function body
+    NF->getBasicBlockList().splice(NF->begin(), F->getBasicBlockList());
+    Argument *NArg = NF->args().begin();
+    Argument *Arg = F->args().begin();
+    Arg->replaceAllUsesWith(NArg);
+    NArg->setName(Arg->getName());
+
+    SmallVector<GetElementPtrInst*, 8> GEPs;
+    for (Value *I: NArg->users()) {
+        auto GEP = dyn_cast<GetElementPtrInst>(I);
+        if (GEP && needAddrSpaceCast(GEP->getResultElementType()))
+            GEPs.push_back(GEP);
+    }
+    for (auto GEP: GEPs) {
+        // Extract IdxList from GEP:
+        SmallVector<Value*, 8> IdxList;
+        IdxList.reserve(GEP->getNumIndices());
+        for (size_t i = 0; i < GEP->getNumIndices(); i++) {
+            IdxList.push_back(GEP->getOperand(i + 1));
+        }
+
+        auto NGEP = GetElementPtrInst::Create(
+            NSTy,
+            GEP->getPointerOperand(),
+            IdxList,
+            GEP->getName(),
+            GEP);
+        assert(NSTy->getTypeAtIndex(structFieldIndex(GEP)) == NGEP->getResultElementType());
+        assert(!needAddrSpaceCast(NGEP->getResultElementType()));
+        NGEP->copyMetadata(*GEP);
+        GEP->replaceAllUsesWith(NGEP);
+        GEP->eraseFromParent();
+
+        // Load as generic and then decay to the actually used address space.
+        // First creating a copy `GEPUsers` as we are going to mutate the instructions.
+        // ASK: Is this required?
+        auto GEPUsers = SmallVector<Value*, 8>(NGEP->users());
+        for (Value *I: GEPUsers) {
+            auto LI = dyn_cast<LoadInst>(I);
+            if (!LI)
+                continue;
+            auto NLI = new LoadInst(NGEP->getResultElementType(), NGEP, "redecay.tmp",
+                                    LI->isVolatile(), LI->getAlignment(), LI->getOrdering(),
+                                    LI->getSyncScopeID(), LI);
+            auto Decay = BitCastInst::Create(Instruction::AddrSpaceCast, NLI, LI->getType(),
+                                             "redecay", LI);
+            NLI->copyMetadata(*LI);
+            LI->replaceAllUsesWith(Decay);
+            LI->eraseFromParent();
+            assert(!needAddrSpaceCast(NLI->getType()));
+        }
+    }
+#ifdef JL_DEBUG_BUILD
+    for (BasicBlock &BB: *NF) {
+        for (Instruction &I: BB) {
             auto Load = dyn_cast<LoadInst>(&I);
             if (!Load)
                 continue;
-            auto GEP = dyn_cast<GetElementPtrInst>(Load->getPointerOperand());
-            if (!(GEP && GEP->getPointerOperand() == Arg))
-                continue;
-            auto T_int1 = Type::getInt1Ty(C);
-            auto MD = MDNode::get(C, ConstantAsMetadata::get(ConstantInt::get(T_int1, true)));
-            I.setMetadata("julia.tapir.load", MD);
+            assert(!needAddrSpaceCast(Load->getType()));
         }
     }
+#endif
+
+    F->eraseFromParent();
+    TOI.Outline = NF;
+#ifdef JL_DEBUG_BUILD
+    assert(!verifyFunction(*NF, &dbgs()));
+#endif
 }
 
 // Based on QthreadsABI

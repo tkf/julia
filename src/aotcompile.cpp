@@ -766,6 +766,9 @@ void addOptimizationPasses(legacy::PassManagerBase *PM, int opt_level,
 
 #ifdef USE_TAPIR
     PM->add(createLowerTapirToTargetPass());
+#ifdef JL_DEBUG_BUILD
+    PM->add(createVerifierPass(false));
+#endif
     PM->add(createAlwaysInlinerLegacyPass()); // Respect always_inline
     PM->add(createDeadCodeEliminationPass());
     PM->add(createCFGSimplificationPass());
