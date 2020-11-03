@@ -78,8 +78,6 @@ void GCInvariantVerifier::visitAddrSpaceCastInst(AddrSpaceCastInst &I) {
           ToAS   == AddressSpace::CalleeRooted ||
           ToAS   == AddressSpace::Derived,
           "Illegal address space cast from tracked ptr", &I);
-    if (I.getMetadata("julia.tapir.addrspacecast"))
-        return;
     Check(FromAS != AddressSpace::CalleeRooted &&
           FromAS != AddressSpace::Derived,
           "Illegal address space cast from decayed ptr", &I);
@@ -88,6 +86,8 @@ void GCInvariantVerifier::visitAddrSpaceCastInst(AddrSpaceCastInst &I) {
 void GCInvariantVerifier::visitStoreInst(StoreInst &SI) {
     Type *VTy = SI.getValueOperand()->getType();
     if (VTy->isPointerTy()) {
+        if (SI.getMetadata("julia.tapir.store"))
+            return;
         /* We currently don't obey this for arguments. That's ok - they're
            externally rooted. */
         unsigned AS = cast<PointerType>(VTy)->getAddressSpace();

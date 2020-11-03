@@ -56,6 +56,9 @@ class JuliaTapir : public TapirTarget, private JuliaPassContext {
     void replaceDecayedPointerInArgStruct(TaskOutlineInfo &);
     void replaceDecayedPointerInOutline(Function &);
 
+    void insertGCPreserve(Function &);
+    void insertPtls(Function &);
+
     public:
         JuliaTapir(Module &M);
         ~JuliaTapir() {}
@@ -238,18 +241,7 @@ void JuliaTapir::preProcessOutlinedTask(Function &F, Instruction *DetachPt,
     // nothing
 }
 
-void JuliaTapir::postProcessOutlinedTask(Function &F, Instruction *DetachPt,
-                                         Instruction *TaskFrameCreate,
-                                         bool IsSpawner) {
-    // nothing
-}
-
-void JuliaTapir::preProcessRootSpawner(Function &F) {
-    // nothing
-}
-
-void JuliaTapir::postProcessRootSpawner(Function &F) {
-    bool need_gc_frame = false;
+void JuliaTapir::insertGCPreserve(Function &F) {
     for (BasicBlock &BB : F) {
         for (Instruction &I : BB) {
             if (CallInst *TG = dyn_cast<CallInst>(&I)) {
@@ -266,21 +258,39 @@ void JuliaTapir::postProcessRootSpawner(Function &F) {
                             CallInst::Create(gc_preserve_end_func, {gctoken}, "", BB2.getTerminator());
                         }
                     }
-                    need_gc_frame = true;
                 }
             }
         }
     }
-    if (need_gc_frame && !getPtls(F)) {
-        // Do what `allocate_gc_frame` (`codegen.cpp`) does:
-        CallInst::Create(
-            ptls_getter,
-            {},
-            "",
-            F.getEntryBlock().getFirstNonPHI());
-        assert(getPtls(F));
-        // TODO: other things in `allocate_gc_frame`
-    }
+}
+
+void JuliaTapir::insertPtls(Function &F) {
+    if (getPtls(F))
+        return;
+    // Do what `allocate_gc_frame` (`codegen.cpp`) does:
+    CallInst::Create(
+        ptls_getter,
+        {},
+        "",
+        F.getEntryBlock().getFirstNonPHI());
+    assert(getPtls(F));
+    // TODO: other things in `allocate_gc_frame`
+}
+
+void JuliaTapir::postProcessOutlinedTask(Function &F, Instruction *DetachPt,
+                                         Instruction *TaskFrameCreate,
+                                         bool IsSpawner) {
+    insertGCPreserve(F);
+    insertPtls(F);
+}
+
+void JuliaTapir::preProcessRootSpawner(Function &F) {
+    // nothing
+}
+
+void JuliaTapir::postProcessRootSpawner(Function &F) {
+    insertGCPreserve(F);
+    insertPtls(F);
 }
 
 // Extract out the index value used by GEP created in LLVM/Tapir's
@@ -293,83 +303,20 @@ uint64_t structFieldIndex(GetElementPtrInst *GEP) {
 // Replace decayed pointers in the argument struct with `AddressSpace::Generic`.
 // See: `GCInvariantVerifier::visitStoreInst`.
 void JuliaTapir::replaceDecayedPointerInArgStruct(TaskOutlineInfo &TOI) {
-    CallBase *ReplCall = cast<CallBase>(TOI.ReplCall);
-    BasicBlock *CallBlock = TOI.ReplStart->getParent();
-
     LLVMContext &C = M.getContext();
-
-    // Check if we need to cast struct fields.
+    CallBase *ReplCall = cast<CallBase>(TOI.ReplCall);
     AllocaInst *CallerArgStruct = cast<AllocaInst>(ReplCall->getArgOperand(0));
-    Type *ArgsTy0 = CallerArgStruct->getAllocatedType();
-    auto OldInputSet = TOI.InputSet;
-    size_t NumInputs = OldInputSet.size();
-    SmallVector<size_t, 8> NeedCast;
-    assert(NumInputs == ArgsTy0->getStructNumElements());
-    for (size_t i = 0; i < NumInputs; i++) {
-        auto V0 = OldInputSet[i];
-        assert(V0->getType() == ArgsTy0->getStructElementType(i));
-        if (auto *VTy = dyn_cast<PointerType>(V0->getType())) {
-            unsigned AS = VTy->getAddressSpace();
-            if (AS == AddressSpace::CalleeRooted || AS == AddressSpace::Derived) {
-                NeedCast.push_back(i);
-            }
-        }
-    }
-    if (NeedCast.empty())
-        return;
-
-    // Compute the new field types.
-    auto NewInputSet = SmallVector<Value*, 8>(TOI.InputSet.begin(), TOI.InputSet.end());
-    for (auto i: NeedCast) {
-        auto V0 = NewInputSet[i];
-        auto *VTy = cast<PointerType>(V0->getType());
-        auto V = BitCastInst::Create(
-            Instruction::AddrSpaceCast,
-            V0,
-            PointerType::get(VTy->getElementType(), AddressSpace::Generic),
-            "undecay",
-            CallerArgStruct);
+    BasicBlock *CallBlock = TOI.ReplStart->getParent();
+    for (Instruction &V: *CallBlock) {
+        auto Store = dyn_cast<StoreInst>(&V);
+        if (!Store)
+            continue;
+        auto GEP = dyn_cast<GetElementPtrInst>(Store->getOperand(1));
+        if (!(GEP && GEP->getPointerOperand() == CallerArgStruct))
+            continue;
         auto T_int1 = Type::getInt1Ty(C);
         auto MD = MDNode::get(C, ConstantAsMetadata::get(ConstantInt::get(T_int1, true)));
-        V->setMetadata("julia.tapir.addrspacecast", MD);
-        NewInputSet[i] = V;
-    }
-
-    TOI.InputSet = ValueSet(NewInputSet.begin(), NewInputSet.end());
-    // ASK: Should We? Does LLVM treat `TOI` as an input + *output* argument?
-
-    // Create a new struct type:
-    SmallVector<Type*, 8> NewInputTypes;
-    NewInputTypes.reserve(NumInputs);
-    for (auto V: NewInputSet) {
-        NewInputTypes.push_back(V->getType());
-    }
-    StructType *ArgsTy = StructType::create(C, NewInputTypes);
-
-    // Replace the instructions to use the new type we just created:
-    CallerArgStruct->setAllocatedType(ArgsTy);
-    SmallVector<StoreInst*, 8> StoreList;
-    StoreList.resize(TOI.InputSet.size());
-    for (Instruction &V: *CallBlock) {
-        if (auto GEP = dyn_cast<GetElementPtrInst>(&V);
-            GEP && GEP->getPointerOperand() == CallerArgStruct)
-        {
-            auto LastIdx = structFieldIndex(GEP);
-            GEP->setResultElementType(ArgsTy->getTypeAtIndex(LastIdx));
-            GEP->setSourceElementType(ArgsTy);
-        } else if (auto Store = dyn_cast<StoreInst>(&V))
-        {
-            auto GEP = dyn_cast<GetElementPtrInst>(Store->getOperand(1));
-            if (GEP && GEP->getPointerOperand() == CallerArgStruct) {
-                auto LastIdx = structFieldIndex(GEP);
-                StoreList[LastIdx] = Store;
-            }
-        }
-    }
-    for (size_t i = 0; i < NumInputs; i++) {
-        auto Store = StoreList[i];
-        assert(Store->getOperand(0) == OldInputSet[i]);
-        Store->setOperand(0, NewInputSet[i]);
+        V.setMetadata("julia.tapir.store", MD);
     }
 
     replaceDecayedPointerInOutline(*TOI.Outline);
