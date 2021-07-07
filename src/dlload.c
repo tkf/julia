@@ -120,24 +120,28 @@ JL_DLLEXPORT void *jl_dlopen(const char *filename, unsigned flags) JL_NOTSAFEPOI
         needsSymRefreshModuleList = 1;
     return lib;
 #else
-    return dlopen(filename,
-                  (flags & JL_RTLD_NOW ? RTLD_NOW : RTLD_LAZY)
-                  | JL_RTLD(flags, LOCAL)
-                  | JL_RTLD(flags, GLOBAL)
+    return dlopen(filename, jl_dlopen_flags(flags));
+#endif
+}
+
+JL_DLLEXPORT unsigned jl_dlopen_flags(unsigned flags) JL_NOTSAFEPOINT
+{
+    return ((flags & JL_RTLD_NOW ? RTLD_NOW : RTLD_LAZY) | JL_RTLD(flags, LOCAL) |
+            JL_RTLD(flags, GLOBAL)
 #ifdef RTLD_NODELETE
-                  | JL_RTLD(flags, NODELETE)
+            | JL_RTLD(flags, NODELETE)
 #endif
 #ifdef RTLD_NOLOAD
-                  | JL_RTLD(flags, NOLOAD)
+            | JL_RTLD(flags, NOLOAD)
 #endif
-#if defined(RTLD_DEEPBIND) && !(defined(JL_ASAN_ENABLED) || defined(JL_TSAN_ENABLED) || defined(JL_MSAN_ENABLED))
-                  | JL_RTLD(flags, DEEPBIND)
+#if defined(RTLD_DEEPBIND) && \
+    !(defined(JL_ASAN_ENABLED) || defined(JL_TSAN_ENABLED) || defined(JL_MSAN_ENABLED))
+            | JL_RTLD(flags, DEEPBIND)
 #endif
 #ifdef RTLD_FIRST
-                  | JL_RTLD(flags, FIRST)
+            | JL_RTLD(flags, FIRST)
 #endif
-                  );
-#endif
+    );
 }
 
 JL_DLLEXPORT int jl_dlclose(void *handle) JL_NOTSAFEPOINT

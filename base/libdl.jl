@@ -149,6 +149,16 @@ function dlopen(f::Function, args...; kwargs...)
 end
 
 """
+    dlopen_flags([flags::Integer]) -> flags′
+
+Return the actual flag that would be used by `jl_dlopen` C function.
+"""
+dlopen_flags(flags::Integer = RTLD_LAZY | RTLD_DEEPBIND) =
+    ccall(:jl_dlopen_flags, UInt32, (UInt32,), flags)
+
+deepbind_enabled() = (dlopen_flags(RTLD_DEEPBIND) & RTLD_DEEPBIND) != 0
+
+"""
     dlopen_e(libfile::AbstractString [, flags::Integer])
 
 Similar to [`dlopen`](@ref), except returns `C_NULL` instead of raising errors.

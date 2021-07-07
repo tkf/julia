@@ -111,6 +111,7 @@
     XX(jl_deprecate_binding) \
     XX(jl_dlclose) \
     XX(jl_dlopen) \
+    XX(jl_dlopen_flags) \
     XX(jl_dlsym) \
     XX(jl_dump_compiles) \
     XX(jl_dump_fptr_asm) \

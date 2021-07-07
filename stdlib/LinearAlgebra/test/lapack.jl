@@ -703,6 +703,10 @@ let A = [NaN NaN; NaN NaN]
 end
 
 # # https://github.com/JuliaLang/julia/pull/39845
-@test LinearAlgebra.LAPACK.liblapack == "libblastrampoline"
+if LinearAlgebra.USE_LIBBLASTRAMPOLINE
+    @test LinearAlgebra.LAPACK.liblapack == "libblastrampoline"
+else
+    @test LinearAlgebra.LAPACK.liblapack == Base.liblapack_name
+end
 
 end # module TestLAPACK

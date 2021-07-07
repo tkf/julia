@@ -1728,6 +1728,7 @@ enum JL_RTLD_CONSTANT {
 typedef void *jl_uv_libhandle; // compatible with dlopen (void*) / LoadLibrary (HMODULE)
 JL_DLLEXPORT jl_uv_libhandle jl_load_dynamic_library(const char *fname, unsigned flags, int throw_err);
 JL_DLLEXPORT jl_uv_libhandle jl_dlopen(const char *filename, unsigned flags) JL_NOTSAFEPOINT;
+JL_DLLEXPORT unsigned jl_dlopen_flags(unsigned flags) JL_NOTSAFEPOINT;
 JL_DLLEXPORT int jl_dlclose(jl_uv_libhandle handle) JL_NOTSAFEPOINT;
 JL_DLLEXPORT int jl_dlsym(jl_uv_libhandle handle, const char *symbol, void ** value, int throw_err) JL_NOTSAFEPOINT;
 

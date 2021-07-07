@@ -606,7 +606,12 @@ end
 end
 
 # https://github.com/JuliaLang/julia/pull/39845
-@test LinearAlgebra.BLAS.libblas == "libblastrampoline"
-@test LinearAlgebra.BLAS.liblapack == "libblastrampoline"
+if LinearAlgebra.USE_LIBBLASTRAMPOLINE
+    @test LinearAlgebra.BLAS.libblas == "libblastrampoline"
+    @test LinearAlgebra.BLAS.liblapack == "libblastrampoline"
+else
+    @test LinearAlgebra.BLAS.libblas == Base.libblas_name
+    @test LinearAlgebra.BLAS.liblapack == Base.liblapack_name
+end
 
 end # module TestBLAS

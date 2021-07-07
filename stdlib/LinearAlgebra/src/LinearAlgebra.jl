@@ -153,6 +153,12 @@ export
 # Constants
     I
 
+if Sys.iswindows()
+    const USE_LIBBLASTRAMPOLINE = true
+else
+    const USE_LIBBLASTRAMPOLINE = Base.Libc.Libdl.deepbind_enabled()
+end
+
 const BlasFloat = Union{Float64,Float32,ComplexF64,ComplexF32}
 const BlasReal = Union{Float64,Float32}
 const BlasComplex = Union{ComplexF64,ComplexF32}
@@ -580,10 +586,10 @@ function __init__()
         # `RPATH` and not `libblastrampoline's`.  Once it's been opened, when LBT tries to open it,
         # it will find the library already loaded.
         libblas_path = Libdl.dlpath(Libdl.dlopen(libblas_path))
-        BLAS.lbt_forward(libblas_path; clear=true)
+        USE_LIBBLASTRAMPOLINE && BLAS.lbt_forward(libblas_path; clear=true)
         if liblapack_path != libblas_path
             liblapack_path = Libdl.dlpath(Libdl.dlopen(liblapack_path))
-            BLAS.lbt_forward(liblapack_path)
+            USE_LIBBLASTRAMPOLINE && BLAS.lbt_forward(liblapack_path)
         end
         BLAS.check()
         Threads.resize_nthreads!(Abuf)
